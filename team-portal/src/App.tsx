@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import {
   Users, ClipboardList, Target as TargetIcon, Lock, Unlock, Plus,
   Shield, CheckCircle2, X
@@ -123,7 +123,7 @@ function PBar({ value, target }: { value: number; target: number }) {
 }
 
 // ---------- UI atoms ----------
-const Stat = ({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) => (
+const Stat = ({ icon, label, value }: { icon: ReactNode; label: string; value: string | number }) => (
   <div className="p-4 rounded-2xl bg-white border shadow-sm">
     <div className="flex items-center gap-3">
       <div className="p-2 bg-slate-100 rounded-xl">{icon}</div>
@@ -135,7 +135,7 @@ const Stat = ({ icon, label, value }: { icon: React.ReactNode; label: string; va
   </div>
 );
 
-const Section = ({ title, children, extra }: { title: string; children: React.ReactNode; extra?: React.ReactNode }) => (
+const Section = ({ title, children, extra }: { title: string; children: ReactNode; extra?: ReactNode }) => (
   <div className="p-4 rounded-2xl bg-white border overflow-hidden">
     <div className="flex items-center justify-between mb-3">
       <div className="font-semibold">{title}</div>
@@ -478,23 +478,24 @@ function Individuals({
 function InputPanel({
   pinOk, setPinOk, form, setForm, addAchievement, ach, removeAchievement,
   targets, setTargets, productConfigs, setProductConfigs, allowed, setAllowed,
-  org, setOrg
+  org, setOrg, setAch
 }: {
   pinOk: boolean;
-  setPinOk: (v: boolean) => void;
+  setPinOk: Dispatch<SetStateAction<boolean>>;
   form: { personId: string; product: string; amount: string; date: string };
-  setForm: React.Dispatch<React.SetStateAction<{ personId: string; product: string; amount: string; date: string }>>;
+  setForm: Dispatch<SetStateAction<{ personId: string; product: string; amount: string; date: string }>>;
   addAchievement: () => void;
   ach: Achievement[];
   removeAchievement: (id: string) => void;
   targets: TargetsPP;
-  setTargets: React.Dispatch<React.SetStateAction<TargetsPP>>;
+  setTargets: Dispatch<SetStateAction<TargetsPP>>;
   productConfigs: ProductConfig[];
-  setProductConfigs: React.Dispatch<React.SetStateAction<ProductConfig[]>>;
+  setProductConfigs: Dispatch<SetStateAction<ProductConfig[]>>;
   allowed: AllowedMap;
-  setAllowed: React.Dispatch<React.SetStateAction<AllowedMap>>;
+  setAllowed: Dispatch<SetStateAction<AllowedMap>>;
   org: Person[];
-  setOrg: React.Dispatch<React.SetStateAction<Person[]>>;
+  setOrg: Dispatch<SetStateAction<Person[]>>;
+  setAch: Dispatch<SetStateAction<Achievement[]>>;
 }) {
   const [newProd, setNewProd] = useState("");
   const [newType, setNewType] = useState<ProductType>("money");
@@ -605,7 +606,7 @@ function InputPanel({
 
   const removeAllAchievementsOf = (personId: string) => {
     // fungsi ini di-call dari deleteEmployee
-    setAch(s => s.filter(a => a.personId !== personId));
+    setAch((s: Achievement[]) => s.filter((a: Achievement) => a.personId !== personId));
   };
 
   return (
@@ -1156,6 +1157,7 @@ export default function App() {
             setAllowed={setAllowed}
             org={org}
             setOrg={setOrg}
+            setAch={setAch}
           />
         )}
 
