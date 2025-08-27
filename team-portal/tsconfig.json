@@ -5,10 +5,21 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
+
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "useDefineForClassFields": true,
+
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
+
     "types": ["vite/client", "react", "react-dom"]
   },
   "include": ["src"]
