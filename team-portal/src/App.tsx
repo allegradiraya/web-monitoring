@@ -1770,7 +1770,7 @@ function PicInputPage({
                 Simpan
               </button>
               <button
-                className="ml-2 px-4 py-2 rounded-xl border"
+                className="text-white ml-2 px-4 py-2 rounded-xl border"
                 onClick={() => nav(0)}
                 title="Refresh Data"
               >
