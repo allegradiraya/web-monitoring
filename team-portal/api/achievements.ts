@@ -1,9 +1,9 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { sql } from "./_db";
+import { getSql } from "./_db";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
-    const sql = getSql(); 
+    const sql = getSql();
+
     if (req.method === "GET") {
       const rows = await sql/*sql*/`
         SELECT a.*, p.name AS person_name
@@ -14,22 +14,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `;
       return res.status(200).json(rows);
     }
+
     if (req.method === "POST") {
       const { id, personId, product, amount, date } = req.body ?? {};
       if (!id || !personId || !product || amount == null || !date)
         return res.status(400).json({ error: "Bad payload" });
+
       await sql/*sql*/`
         INSERT INTO achievements (id, person_id, product, amount, date)
         VALUES (${id}, ${personId}, ${product}, ${amount}, ${date});
       `;
       return res.status(201).json({ ok: true });
     }
+
     if (req.method === "DELETE") {
       const { id } = req.query;
-      if (!id || Array.isArray(id)) return res.status(400).json({ error: "Missing id" });
-      await sql`DELETE FROM achievements WHERE id=${id};`;
+      if (!id || Array.isArray(id))
+        return res.status(400).json({ error: "Missing id" });
+
+      await sql`DELETE FROM achievements WHERE id=${id}`;
       return res.status(200).json({ ok: true });
     }
+
     res.setHeader("Allow", "GET,POST,DELETE");
     res.status(405).end("Method Not Allowed");
   } catch (e: any) {
