@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { sql } from "./_db";
+import { getSql } from "./_db";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(_req: VercelRequest, res: VercelResponse) {
   try {
-    const sql = getSql(); 
+    const sql = getSql();
+
     await sql`CREATE TABLE IF NOT EXISTS persons(
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
