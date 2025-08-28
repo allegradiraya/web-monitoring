@@ -1,13 +1,8 @@
 export default async function handler(_req: any, res: any) {
-  const has_DATABASE_URL = !!process.env.DATABASE_URL;
-  const has_POSTGRES_URL_NON_POOLING = !!process.env.POSTGRES_URL_NON_POOLING;
-  const has_POSTGRES_URL = !!process.env.POSTGRES_URL;
-
   const chosen =
     process.env.POSTGRES_URL_NON_POOLING ??
     process.env.DATABASE_URL ??
-    process.env.POSTGRES_URL ??
-    "";
+    process.env.POSTGRES_URL ?? "";
 
   let chosen_env = "POSTGRES_URL_NON_POOLING";
   if (!process.env.POSTGRES_URL_NON_POOLING) {
@@ -18,9 +13,9 @@ export default async function handler(_req: any, res: any) {
   try { chosen_host = new URL(chosen).host; } catch {}
 
   res.status(200).json({
-    has_DATABASE_URL,
-    has_POSTGRES_URL_NON_POOLING,
-    has_POSTGRES_URL,
+    has_DATABASE_URL: !!process.env.DATABASE_URL,
+    has_POSTGRES_URL_NON_POOLING: !!process.env.POSTGRES_URL_NON_POOLING,
+    has_POSTGRES_URL: !!process.env.POSTGRES_URL,
     chosen_env,
     chosen_host
   });
