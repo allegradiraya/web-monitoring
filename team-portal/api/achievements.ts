@@ -1,47 +1,61 @@
-type Ach = { id?: string; personId: string; product: string; amount: number; date: string };
+// team-portal/api/achievements.ts
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getSql } from './_db';
 
-async function readJson(req: any) {
-  if (req.body && typeof req.body === "object") return req.body;
-  const chunks: Buffer[] = []; for await (const c of req) chunks.push(Buffer.from(c));
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); } catch { return {}; }
-}
-const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const sql = getSql();
 
-export default async function handler(req: any, res: any) {
   try {
-    const mod =
-      (await import(/* @vite-ignore */ "./_db.js").catch(() => null)) ??
-      (await import("./_db").catch(() => null));
-    if (!mod) throw new Error("db_import_failed");
-    const { getSql } = mod as { getSql: () => any };
-    const sql = getSql();
+    if (req.method === 'GET') {
+      // Optional range filter (?from=YYYY-MM-DD&to=YYYY-MM-DD)
+      const { from, to } = req.query as { from?: string; to?: string };
+      const rows =
+        from && to
+          ? await sql/*sql*/`
+              select id, person_id, product, amount, date
+              from achievements
+              where date >= ${from} and date < ${to}
+              order by date desc, id desc
+            `
+          : await sql/*sql*/`
+              select id, person_id, product, amount, date
+              from achievements
+              order by date desc, id desc
+            `;
 
-    if (req.method === "GET") {
-      const limit = Math.min(1000, Number(req.query?.limit) || 200);
-      const rows = await sql`
-        select id, person_id as "personId", product, amount::float as amount, date
-        from achievements
-        order by date desc, id desc
-        limit ${limit}`;
-      return res.status(200).json({ ok: true, rows });
+      res.status(200).json({ ok: true, rows });
+      return;
     }
 
-    if (req.method === "POST") {
-      const b: Ach = await readJson(req);
-      if (!b?.personId || !b?.product || b?.amount == null || !b?.date) {
-        return res.status(400).json({ ok: false, error: "Missing fields" });
+    if (req.method === 'POST') {
+      const { personId, product, amount, date } = req.body || {};
+      if (!personId || !product || amount == null || !date) {
+        res.status(400).json({ ok: false, error: 'missing_fields' });
+        return;
       }
-      const id = b.id ?? uid();
-      await sql`
-        insert into achievements (id, person_id, product, amount, date)
-        values (${id}, ${b.personId}, ${b.product}, ${Number(b.amount)||0}, ${b.date})
-        on conflict (id) do nothing`;
-      return res.status(200).json({ ok: true, id });
+
+      const [row] = await sql/*sql*/`
+        insert into achievements (person_id, product, amount, date)
+        values (${personId}, ${product}, ${Number(amount)}, ${date})
+        returning id, person_id, product, amount, date
+      `;
+      res.status(201).json({ ok: true, row });
+      return;
     }
 
-    res.setHeader("Allow", "GET, POST");
-    res.status(405).end("Method Not Allowed");
+    if (req.method === 'DELETE') {
+      const id = (req.query?.id as string) || (req.body?.id as string);
+      if (!id) {
+        res.status(400).json({ ok: false, error: 'missing_id' });
+        return;
+      }
+      await sql/*sql*/`delete from achievements where id = ${id}`;
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    res.status(405).json({ ok: false, error: 'method_not_allowed' });
   } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 }
