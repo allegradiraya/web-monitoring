@@ -2,7 +2,6 @@ import { neon, neonConfig } from "@neondatabase/serverless";
 neonConfig.fetchConnectionCache = true;
 
 export function pickDbUrl(): string {
-  // Prioritaskan non-pooling
   return (
     process.env.POSTGRES_URL_NON_POOLING ??
     process.env.DATABASE_URL ??
