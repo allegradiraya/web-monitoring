@@ -3,6 +3,7 @@ import { sql } from "./_db";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const sql = getSql(); 
     if (req.method === "GET") {
       const rows = await sql/*sql*/`
         SELECT a.*, p.name AS person_name
