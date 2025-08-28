@@ -81,7 +81,7 @@ const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
   return r.json();
 };
 
-// Default org (jaga-jaga jika API belum ada)
+// Default org (fallback jika API belum ada)
 const DEFAULT_ORG: Person[] = [
   { id: "lead-1", name: "Branch Manager — Sukamara", role: "BM", unit: "LEAD" },
   { id: "mbm-1", name: "Micro Banking Manager", role: "MBM", unit: "MBM" },
@@ -626,7 +626,7 @@ function Individuals({
 }
 
 /* ===================================================
-   PANEL INPUT (BM) – lengkap + kelompok PIC
+   PANEL INPUT (BM) – lengkap + kelompok PIC + REKAP BULANAN
    =================================================== */
 
 function InputPanel({
@@ -818,6 +818,207 @@ function InputPanel({
   const removeAllAchievementsOf = (personId: string) => {
     setAch((s: Achievement[]) => s.filter((a: Achievement) => a.personId !== personId));
   };
+
+  /* -------------------------
+     REKAP BULANAN (CSV + Leaderboard)
+     ------------------------- */
+
+  const [month, setMonth] = useState(() => today().slice(0, 7)); // "YYYY-MM"
+
+  // util filter bulan
+  const inMonth = (d: string, ym: string) => d.slice(0, 7) === ym;
+
+  // index bulanan orang->produk
+  const monthPPIdx = useMemo(() => {
+    const idx = new Map<string, Map<string, number>>();
+    for (const a of ach) {
+      if (!inMonth(a.date, month)) continue;
+      if (!idx.has(a.personId)) idx.set(a.personId, new Map());
+      const m = idx.get(a.personId)!;
+      m.set(a.product, (m.get(a.product) || 0) + (Number(a.amount) || 0));
+    }
+    return idx;
+  }, [ach, month]);
+
+  // hitung total2 per orang (money & unit) + skor fairness
+  type PersonMonthRow = {
+    personId: string;
+    name: string;
+    role: string;
+    unit: Person["unit"];
+    category: PersonCategory;
+    perProduct: Record<string, number>;
+    totalMoney: number;
+    totalUnit: number;
+    score: number; // rata2 min(ach/target,1) across produk yg punya target>0 & diizinkan
+    countedProducts: number;
+  };
+
+  const catOf = (pid: string) =>
+    picCategory[pid] ??
+    defaultCategoryForPerson(org.find((p) => p.id === pid) || ({} as Person));
+
+  const rowsForMonth: PersonMonthRow[] = useMemo(() => {
+    const list: PersonMonthRow[] = [];
+    const productNames = productConfigs.map((p) => p.name);
+    for (const p of org) {
+      if (p.unit === "LEAD") continue;
+      const perProduct: Record<string, number> = {};
+      let totalMoney = 0;
+      let totalUnit = 0;
+      let sumRatio = 0;
+      let cnt = 0;
+
+      for (const cfg of productConfigs) {
+        const allowedHere = !!allowed?.[p.id]?.[cfg.name];
+        const val = allowedHere ? Number(monthPPIdx.get(p.id)?.get(cfg.name) || 0) : 0;
+        perProduct[cfg.name] = val;
+        if (cfg.type === "money") totalMoney += val;
+        else totalUnit += val;
+
+        const tgt = getTarget(targets, p.id, cfg.name);
+        if (allowedHere && tgt > 0) {
+          const ratio = Math.min(1, val / tgt);
+          sumRatio += ratio;
+          cnt += 1;
+        }
+      }
+
+      const score = cnt > 0 ? sumRatio / cnt : 0;
+      list.push({
+        personId: p.id,
+        name: p.name,
+        role: p.role,
+        unit: p.unit,
+        category: catOf(p.id),
+        perProduct,
+        totalMoney,
+        totalUnit,
+        score,
+        countedProducts: cnt,
+      });
+    }
+    // hanya tampilkan bila ada kontribusi apapun di bulan tsb (atau ada target?—pilih kontribusi)
+    return list.filter(
+      (r) =>
+        Object.values(r.perProduct).some((v) => v > 0) ||
+        r.countedProducts > 0,
+    );
+  }, [org, productConfigs, allowed, monthPPIdx, targets, picCategory]);
+
+  // leaderboard per kategori
+  const leaderboardMikro = useMemo(
+    () =>
+      rowsForMonth
+        .filter((r) => r.category === "MIKRO")
+        .sort((a, b) => (b.score - a.score) || (b.totalMoney + b.totalUnit - (a.totalMoney + a.totalUnit))),
+    [rowsForMonth],
+  );
+  const leaderboardOperasional = useMemo(
+    () =>
+      rowsForMonth
+        .filter((r) => r.category === "OPERASIONAL")
+        .sort((a, b) => (b.score - a.score) || (b.totalMoney + b.totalUnit - (a.totalMoney + a.totalUnit))),
+    [rowsForMonth],
+  );
+
+  // export CSV
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const toCSV = (arr: string[][]) =>
+    arr.map((row) =>
+      row
+        .map((cell) => {
+          const s = cell ?? "";
+          // escape comma/quote/newline
+          if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+          return s;
+        })
+        .join(","),
+    ).join("\n");
+
+  const exportMonthCSV = () => {
+    const prodNames = productConfigs.map((p) => p.name);
+
+    const header = [
+      "Month",
+      "PersonID",
+      "Name",
+      "Role",
+      "Unit",
+      "Category",
+      ...prodNames, // nilai per produk
+      "TotalMoney",
+      "TotalUnit",
+      "Score(0-1)",
+      "CountedProducts",
+    ];
+
+    const rows: string[][] = [header];
+
+    for (const r of rowsForMonth) {
+      rows.push([
+        month,
+        r.personId,
+        r.name,
+        r.role,
+        r.unit,
+        r.category,
+        ...prodNames.map((n) => String(r.perProduct[n] ?? 0)),
+        String(r.totalMoney),
+        String(r.totalUnit),
+        r.score.toFixed(3),
+        String(r.countedProducts),
+      ]);
+    }
+
+    // Tambahkan 2 tabel leaderboard di bawah (dalam file yg sama)
+    rows.push([]);
+    rows.push([`Leaderboard MIKRO (${month})`]);
+    rows.push(["Rank", "Name", "Role", "Unit", "Score(0-1)", "TotalMoney", "TotalUnit"]);
+    leaderboardMikro.forEach((r, i) => {
+      rows.push([
+        String(i + 1),
+        r.name,
+        r.role,
+        r.unit,
+        r.score.toFixed(3),
+        String(r.totalMoney),
+        String(r.totalUnit),
+      ]);
+    });
+
+    rows.push([]);
+    rows.push([`Leaderboard OPERASIONAL (${month})`]);
+    rows.push(["Rank", "Name", "Role", "Unit", "Score(0-1)", "TotalMoney", "TotalUnit"]);
+    leaderboardOperasional.forEach((r, i) => {
+      rows.push([
+        String(i + 1),
+        r.name,
+        r.role,
+        r.unit,
+        r.score.toFixed(3),
+        String(r.totalMoney),
+        String(r.totalUnit),
+      ]);
+    });
+
+    const csv = toCSV(rows);
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `rekap_${month}.csv`);
+  };
+
+  const [showLB, setShowLB] = useState(false);
+
+  /* ------------------------- UI ------------------------- */
 
   return (
     <div className="space-y-4">
@@ -1064,7 +1265,14 @@ function InputPanel({
           </Section>
 
           {/* Kelompok PIC (MIKRO / OPERASIONAL) */}
-          <Section title="Kelompok PIC (Mikro / Operasional)">
+          <Section
+            title="Kelompok PIC (Mikro / Operasional)"
+            extra={
+              <Link to="/pic" className="px-3 py-1.5 rounded-lg border bg-white">
+                Buka Halaman PIC →
+              </Link>
+            }
+          >
             <table className="w-full table-fixed text-sm">
               <thead className="bg-slate-50 text-left">
                 <tr>
@@ -1241,6 +1449,100 @@ function InputPanel({
                 * Menghapus pegawai akan menghapus perolehan, target, izin, dan kategori PIC terkait.
               </div>
             </div>
+          </Section>
+
+          <Section
+            title="Rekap Bulanan & Leaderboard (Fair Ranking)"
+            extra={<div className="text-sm text-slate-500">CSV bisa dibuka di Excel</div>}
+          >
+            <div className="grid md:grid-cols-5 gap-3 items-end">
+              <div className="md:col-span-2">
+                <div className="text-sm mb-1">Bulan</div>
+                <input
+                  className="px-3 py-2 rounded-xl border w-full"
+                  type="month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2 md:col-span-3">
+                <button className="px-3 py-2 rounded-xl border" onClick={exportMonthCSV}>
+                  Download Rekap (CSV)
+                </button>
+                <button
+                  className="px-3 py-2 rounded-xl border"
+                  onClick={() => setShowLB((v) => !v)}
+                >
+                  {showLB ? "Sembunyikan Leaderboard" : "Lihat Leaderboard"}
+                </button>
+              </div>
+            </div>
+
+            {showLB && (
+              <div className="mt-4 grid md:grid-cols-2 gap-4">
+                <div className="p-3 rounded-xl border bg-white">
+                  <div className="font-semibold mb-2">Leaderboard Mikro — {month}</div>
+                  <table className="w-full table-fixed text-sm">
+                    <thead className="bg-slate-50 text-left">
+                      <tr>
+                        <th className="p-2 w-[10%]">#</th>
+                        <th className="p-2 w-[40%]">Nama</th>
+                        <th className="p-2 w-[20%] text-right">Score</th>
+                        <th className="p-2 w-[30%] text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {leaderboardMikro.map((r, i) => (
+                        <tr key={r.personId} className="border-t">
+                          <td className="p-2">{i + 1}</td>
+                          <td className="p-2 min-w-0 truncate">{r.name}</td>
+                          <td className="p-2 text-right">{(r.score * 100).toFixed(1)}%</td>
+                          <td className="p-2 text-right">{nfmt(r.totalMoney + r.totalUnit)}</td>
+                        </tr>
+                      ))}
+                      {leaderboardMikro.length === 0 && (
+                        <tr>
+                          <td className="p-2 text-slate-500" colSpan={4}>
+                            Belum ada data bulan ini.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="p-3 rounded-xl border bg-white">
+                  <div className="font-semibold mb-2">Leaderboard Operasional — {month}</div>
+                  <table className="w-full table-fixed text-sm">
+                    <thead className="bg-slate-50 text-left">
+                      <tr>
+                        <th className="p-2 w-[10%]">#</th>
+                        <th className="p-2 w-[40%]">Nama</th>
+                        <th className="p-2 w-[20%] text-right">Score</th>
+                        <th className="p-2 w-[30%] text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {leaderboardOperasional.map((r, i) => (
+                        <tr key={r.personId} className="border-t">
+                          <td className="p-2">{i + 1}</td>
+                          <td className="p-2 min-w-0 truncate">{r.name}</td>
+                          <td className="p-2 text-right">{(r.score * 100).toFixed(1)}%</td>
+                          <td className="p-2 text-right">{nfmt(r.totalMoney + r.totalUnit)}</td>
+                        </tr>
+                      ))}
+                      {leaderboardOperasional.length === 0 && (
+                        <tr>
+                          <td className="p-2 text-slate-500" colSpan={4}>
+                            Belum ada data bulan ini.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </Section>
 
           <Section title="Log Input Terbaru">
@@ -1460,10 +1762,10 @@ function PicInputPage({
             <div className="md:col-span-2">
               <button
                 className={`px-4 py-2 rounded-xl ${
-                  canSave ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-500"
+                  personId && product && amount ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-500"
                 }`}
                 onClick={submit}
-                disabled={!canSave}
+                disabled={!(personId && product && amount)}
               >
                 Simpan
               </button>
@@ -1583,6 +1885,7 @@ function PortalApp({
       { method: "POST", body: JSON.stringify(body) },
     );
     if (!r.ok) return alert(r.error || "Gagal simpan ke DB");
+
     // Optimistic append:
     setAch((s) => [
       ...s,
