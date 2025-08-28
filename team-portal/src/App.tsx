@@ -104,9 +104,26 @@ function unitTotalForProducts(
 /* =========================================================
    SMALL UI ATOMS
 ========================================================= */
-const Btn = ({ children, onClick, className = "", title, type = "button" as "button" | "submit" }) => (
-  <button type={type} onClick={onClick} title={title}
-    className={`px-3 py-2 rounded-xl bg-slate-900 text-white border border-slate-800 hover:bg-slate-800 transition ${className}`}>
+const Btn = ({
+  children, onClick, className = "", title, type = "button" as "button" | "submit", disabled
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  className?: string;
+  title?: string;
+  type?: "button" | "submit";
+  disabled?: boolean;
+}) => (
+  <button
+    type={type}
+    onClick={onClick}
+    disabled={disabled}
+    title={title}
+    className={`px-3 py-2 rounded-xl border transition
+      bg-slate-900 border-slate-800 text-white hover:bg-slate-800
+      disabled:opacity-60 disabled:cursor-not-allowed
+      ${className}`}
+  >
     {children}
   </button>
 );
@@ -176,13 +193,13 @@ function PersonRow({
       {productConfigs.map(cfg => {
         const isAllowed = !!allowed?.[p.id]?.[cfg.name];
         if (!isAllowed) return (
-          <td key={cfg.name} className="p-2 align-top text-slate-400 min-w-[120px]">—</td>
+          <td key={cfg.name} className="p-2 align-top text-slate-400 min-w-[160px]">—</td>
         );
         const val = getPP(ppIdx, p.id, cfg.name);
         const tgt = getTarget(targets, p.id, cfg.name);
         const isMoney = cfg.type === "money";
         return (
-          <td key={cfg.name} className="p-2 align-top min-w-[140px]">
+          <td key={cfg.name} className="p-2 align-top min-w-[160px]">
             <ProductCell value={val} target={tgt} isMoney={isMoney} />
           </td>
         );
@@ -202,6 +219,21 @@ function visibleProductsForUnit(
   return productConfigs.filter(cfg =>
     people.some(p => !!allowed?.[p.id]?.[cfg.name])
   );
+}
+
+function visibleProductsForAll(
+  people: Person[],
+  productConfigs: ProductConfig[],
+  allowed: AllowedMap
+): ProductConfig[] {
+  // union dari semua produk yang diizinkan minimal oleh 1 pegawai
+  const set = new Set<string>();
+  people.forEach(p => {
+    productConfigs.forEach(cfg => {
+      if (allowed?.[p.id]?.[cfg.name]) set.add(cfg.name);
+    });
+  });
+  return productConfigs.filter(cfg => set.has(cfg.name));
 }
 
 function makeCSV(rows: any[], headers: string[]) {
@@ -250,7 +282,7 @@ async function apiSyncPersons(persons: Person[]) {
 }
 
 /* =========================================================
-   OVERVIEW
+   OVERVIEW — DIGABUNG 1 TABEL
 ========================================================= */
 function Overview({
   ach, unitTotal, targets, productConfigs, allowed, org
@@ -263,133 +295,67 @@ function Overview({
   org: Person[];
 }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
-
   const microKURKUM = useMemo(
     () => unitTotalForProducts(ach, "MBM", MICRO_INCLUDED_PRODUCTS, org),
     [ach, org]
   );
 
-  const ProductHeads = ({ list }: { list: ProductConfig[] }) => (
-    <>
-      {list.map(cfg => (
-        <th key={cfg.name} className="p-2 w-[160px] text-right">{cfg.name}</th>
-      ))}
-    </>
+  const peopleAll = useMemo(
+    () => org.filter(p => p.unit !== "LEAD"),
+    [org]
+  );
+  const colsALL = useMemo(
+    () => visibleProductsForAll(peopleAll, productConfigs, allowed),
+    [peopleAll, productConfigs, allowed]
   );
 
-  const peopleMBM = org.filter(byUnit("MBM"));
-  const peopleBOS = org.filter(byUnit("BOS"));
-  const peopleSOC = org.filter(byUnit("SOCIAL"));
-  const peopleSGK = org.filter(byUnit("SGK"));
-
-  const colsMBM = visibleProductsForUnit(peopleMBM, productConfigs, allowed);
-  const colsBOS = visibleProductsForUnit(peopleBOS, productConfigs, allowed);
-  const colsSOC = visibleProductsForUnit(peopleSOC, productConfigs, allowed);
-  const colsSGK = visibleProductsForUnit(peopleSGK, productConfigs, allowed);
-
-  const makeMinW = (cols: number) => ({ minWidth: 360 + cols * 160 });
+  const minW = { minWidth: 360 + colsALL.length * 160 };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <Stat icon={<Users size={18} />} label="Total Anggota" value={org.length - 1} />
-      <Stat icon={<ClipboardList size={18} />} label="Input (bulan ini)"
-        value={ach.filter(a => a.date.slice(0, 7) === today().slice(0, 7)).length} />
-      <Stat icon={<TargetIcon size={18} />} label="Micro" value={nfmt(microKURKUM)} />
-      <Stat icon={<Shield size={18} />} label="Operasional" value={nfmt(unitTotal("BOS"))} />
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Stat icon={<Users size={18} />} label="Total Anggota" value={org.length - 1} />
+        <Stat icon={<ClipboardList size={18} />} label="Input (bulan ini)"
+          value={ach.filter(a => a.date.slice(0, 7) === today().slice(0, 7)).length} />
+        <Stat icon={<TargetIcon size={18} />} label="Micro (KUR+KUM/MBM)" value={nfmt(microKURKUM)} />
+      </div>
 
-      {/* MBM */}
-      <Section title="Ringkasan MBM (SGP)">
+      <Section title="Overview Semua Pegawai">
         <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm" style={makeMinW(colsMBM.length)}>
+          <table className="w-full table-fixed text-sm" style={minW}>
             <thead className="bg-slate-50 text-left">
               <tr>
                 <th className="p-2 min-w-[220px] sticky left-0 bg-slate-50 z-10">Nama</th>
                 <th className="p-2 min-w-[140px] sticky left-[220px] bg-slate-50 z-10">Role</th>
-                <ProductHeads list={colsMBM} />
+                {colsALL.map(cfg => (
+                  <th key={cfg.name} className="p-2 w-[160px] text-right">{cfg.name}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {peopleMBM.map(p => (
-                <PersonRow key={p.id} p={p} ppIdx={ppIdx} targets={targets}
-                  productConfigs={colsMBM} allowed={allowed} />
+              {peopleAll.map(p => (
+                <PersonRow
+                  key={p.id}
+                  p={p}
+                  ppIdx={ppIdx}
+                  targets={targets}
+                  productConfigs={colsALL}
+                  allowed={allowed}
+                />
               ))}
             </tbody>
           </table>
         </div>
-        {colsMBM.length === 0 && <div className="text-xs text-slate-500 mt-2">Tidak ada produk yang diizinkan di unit ini.</div>}
-      </Section>
-
-      {/* BOS */}
-      <Section title="Ringkasan BOS (Teller/CS/Security)">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm" style={makeMinW(colsBOS.length)}>
-            <thead className="bg-slate-50 text-left">
-              <tr>
-                <th className="p-2 min-w-[220px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                <th className="p-2 min-w-[140px] sticky left-[220px] bg-slate-50 z-10">Role</th>
-                <ProductHeads list={colsBOS} />
-              </tr>
-            </thead>
-            <tbody>
-              {peopleBOS.map(p => (
-                <PersonRow key={p.id} p={p} ppIdx={ppIdx} targets={targets}
-                  productConfigs={colsBOS} allowed={allowed} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {colsBOS.length === 0 && <div className="text-xs text-slate-500 mt-2">Tidak ada produk yang diizinkan di unit ini.</div>}
-      </Section>
-
-      {/* SOCIAL */}
-      <Section title="Social Aid">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm" style={makeMinW(colsSOC.length)}>
-            <thead className="bg-slate-50 text-left">
-              <tr>
-                <th className="p-2 min-w-[220px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                <th className="p-2 min-w-[140px] sticky left-[220px] bg-slate-50 z-10">Role</th>
-                <ProductHeads list={colsSOC} />
-              </tr>
-            </thead>
-            <tbody>
-              {peopleSOC.map(p => (
-                <PersonRow key={p.id} p={p} ppIdx={ppIdx} targets={targets}
-                  productConfigs={colsSOC} allowed={allowed} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {colsSOC.length === 0 && <div className="text-xs text-slate-500 mt-2">Tidak ada produk yang diizinkan di unit ini.</div>}
-      </Section>
-
-      {/* SGK */}
-      <Section title="SGK (Langsung oleh BM)">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm" style={makeMinW(colsSGK.length)}>
-            <thead className="bg-slate-50 text-left">
-              <tr>
-                <th className="p-2 min-w-[220px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                <th className="p-2 min-w-[140px] sticky left-[220px] bg-slate-50 z-10">Role</th>
-                <ProductHeads list={colsSGK} />
-              </tr>
-            </thead>
-            <tbody>
-              {peopleSGK.map(p => (
-                <PersonRow key={p.id} p={p} ppIdx={ppIdx} targets={targets}
-                  productConfigs={colsSGK} allowed={allowed} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {colsSGK.length === 0 && <div className="text-xs text-slate-500 mt-2">Tidak ada produk yang diizinkan di unit ini.</div>}
+        {colsALL.length === 0 && (
+          <div className="text-xs text-slate-500 mt-2">Belum ada produk yang diizinkan untuk siapapun.</div>
+        )}
       </Section>
     </div>
   );
 }
 
 /* =========================================================
-   UNIT BOARD (masih pakai tabel scrollable)
+   UNIT BOARD (tetap ada bila kamu butuh per unit)
 ========================================================= */
 function UnitBoard({
   unit, title, ach, unitTotal, targets, productConfigs, allowed, org
@@ -409,14 +375,6 @@ function UnitBoard({
   const cols = visibleProductsForUnit(people, productConfigs, allowed);
   const minW = { minWidth: 360 + cols.length * 160 };
 
-  const ProductHeads = () => (
-    <>
-      {cols.map(cfg => (
-        <th key={cfg.name} className="p-2 w-[160px] text-right">{cfg.name}</th>
-      ))}
-    </>
-  );
-
   return (
     <div className="space-y-4">
       <Section title={title} extra={<div className="text-sm text-slate-500">Total unit: {nfmt(unitTotal(unit))}</div>}>
@@ -426,7 +384,9 @@ function UnitBoard({
               <tr>
                 <th className="p-2 min-w-[220px] sticky left-0 bg-slate-50 z-10">Nama</th>
                 <th className="p-2 min-w-[140px] sticky left-[220px] bg-slate-50 z-10">Role</th>
-                <ProductHeads />
+                {cols.map(cfg => (
+                  <th key={cfg.name} className="p-2 w-[160px] text-right">{cfg.name}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -692,8 +652,11 @@ function InputPanel({
               </div>
 
               <div className="md:col-span-4">
-                <Btn className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-300 !text-white"} flex items-center gap-2`}
-                  onClick={() => { if (canAdd) addAchievement(); }} >
+                <Btn
+                  className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
+                  onClick={() => { if (canAdd) addAchievement(); }}
+                  disabled={!canAdd}
+                >
                   <Plus size={16} /> Tambah
                 </Btn>
               </div>
@@ -777,15 +740,15 @@ function InputPanel({
             </div>
           </Section>
 
-          {/* Target per orang per produk (scrollable + sticky) */}
+          {/* Target per orang per produk — FIX anti menumpuk */}
           <Section title="Target per Orang • per Produk">
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed text-sm" style={{ minWidth: 420 + productConfigs.length * 140 }}>
+              <table className="w-full table-fixed text-sm" style={{ minWidth: 420 + productConfigs.length * 160 }}>
                 <thead className="bg-slate-50 text-left">
                   <tr>
                     <th className="p-2 min-w-[260px] sticky left-0 bg-slate-50 z-10">Nama</th>
                     <th className="p-2 min-w-[160px] sticky left-[260px] bg-slate-50 z-10">Role</th>
-                    {productConfigs.map(cfg => (<th key={cfg.name} className="p-2 text-right min-w-[140px]">{cfg.name}</th>))}
+                    {productConfigs.map(cfg => (<th key={cfg.name} className="p-2 text-right min-w-[160px]">{cfg.name}</th>))}
                   </tr>
                 </thead>
                 <tbody>
@@ -796,9 +759,9 @@ function InputPanel({
                       {productConfigs.map(cfg => {
                         const enabled = !!allowed?.[p.id]?.[cfg.name];
                         return (
-                          <td key={cfg.name} className="p-2 text-right min-w-[140px]">
+                          <td key={cfg.name} className="p-2 text-right min-w-[160px]">
                             <input
-                              className={`px-2 py-1 rounded-lg border w-24 text-right ${enabled ? "" : "bg-slate-100 text-slate-400"}`}
+                              className={`px-2 py-1 rounded-lg border w-full text-right ${enabled ? "" : "bg-slate-100 text-slate-400"}`}
                               type="number" inputMode="numeric"
                               value={String(targets?.[p.id]?.[cfg.name] ?? "")}
                               onChange={(e) => {
