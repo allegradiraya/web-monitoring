@@ -45,8 +45,43 @@ type ProductConfig = { name: string; type: ProductType };
 // izin produk per pegawai
 type AllowedMap = Record<string, Record<string, boolean>>;
 
-// -------- Data Org (default) --------
+// Pengelompokan PIC
+type PersonCategory = "MIKRO" | "OPERASIONAL";
+type PersonCategoryMap = Record<string, PersonCategory>;
+
+// -------- Storage Keys --------
+const K_ORG = "tm_org_v1";
+const K_ACH = "tm_achievements";
+const K_PINOK = "tm_pin_ok";
+const K_TGT_PP = "tm_targets_pp"; // Record<personId, Record<product, number>>
+const K_FP = "tm_featured_products_v2"; // ProductConfig[]
+const K_ALLOWED = "tm_allowed_products_v1"; // AllowedMap
+const K_PIC_CAT = "tm_pic_category_v1"; // PersonCategoryMap
+
+// -------- Helpers --------
 const uid = () => Math.random().toString(36).slice(2, 9);
+const today = () => new Date().toISOString().slice(0, 10);
+const nfmt = (n: number) => n.toLocaleString();
+
+const load = <T,>(k: string, def: T): T => {
+  try {
+    const v = localStorage.getItem(k);
+    return v ? (JSON.parse(v) as T) : def;
+  } catch {
+    return def;
+  }
+};
+const save = (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v));
+
+const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+  const r = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  return r.json();
+};
+
+// Default org (jaga-jaga jika API belum ada)
 const DEFAULT_ORG: Person[] = [
   { id: "lead-1", name: "Branch Manager — Sukamara", role: "BM", unit: "LEAD" },
   { id: "mbm-1", name: "Micro Banking Manager", role: "MBM", unit: "MBM" },
@@ -63,33 +98,20 @@ const DEFAULT_ORG: Person[] = [
   { id: "sgk-galih", name: "Galih Putra", role: "SGK", unit: "SGK" },
 ];
 
-// -------- Storage Keys --------
-const K_ORG = "tm_org_v1";
-const K_ACH = "tm_achievements";
-const K_PINOK = "tm_pin_ok";
-const K_TGT_PP = "tm_targets_pp"; // Record<personId, Record<product, number>>
-const K_FP = "tm_featured_products_v2"; // ProductConfig[]
-const K_ALLOWED = "tm_allowed_products_v1"; // AllowedMap
+// Default produk
+const DEFAULT_PRODUCT_CONFIG: ProductConfig[] = [
+  { name: "KUR", type: "money" },
+  { name: "LIVIN", type: "unit" },
+  { name: "AXA", type: "unit" },
+];
 
-// -------- Helpers --------
-const load = <T,>(k: string, def: T): T => {
-  try {
-    const v = localStorage.getItem(k);
-    return v ? (JSON.parse(v) as T) : def;
-  } catch {
-    return def;
+// --- kategori default utk pegawai
+const defaultCategoryForPerson = (p: Person): PersonCategory => {
+  const r = p.role.toLowerCase();
+  if (r.includes("security") || p.unit === "SGK" || p.unit === "SOCIAL") {
+    return "OPERASIONAL";
   }
-};
-const save = (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v));
-const today = () => new Date().toISOString().slice(0, 10);
-const nfmt = (n: number) => n.toLocaleString();
-
-const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
-  const r = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  return r.json();
+  return "MIKRO";
 };
 
 function sumByPerson(achs: Achievement[]) {
@@ -604,7 +626,7 @@ function Individuals({
 }
 
 /* ===================================================
-   PANEL INPUT (BM) - masih seperti versi lama
+   PANEL INPUT (BM) – lengkap + kelompok PIC
    =================================================== */
 
 function InputPanel({
@@ -624,6 +646,8 @@ function InputPanel({
   org,
   setOrg,
   setAch,
+  picCategory,
+  setPicCategory,
 }: {
   pinOk: boolean;
   setPinOk: Dispatch<SetStateAction<boolean>>;
@@ -643,6 +667,8 @@ function InputPanel({
   org: Person[];
   setOrg: Dispatch<SetStateAction<Person[]>>;
   setAch: Dispatch<SetStateAction<Achievement[]>>;
+  picCategory: PersonCategoryMap;
+  setPicCategory: Dispatch<SetStateAction<PersonCategoryMap>>;
 }) {
   const [newProd, setNewProd] = useState("");
   const [newType, setNewType] = useState<ProductType>("money");
@@ -737,9 +763,19 @@ function InputPanel({
     const next = [...org, person];
     setOrg(next);
     save(K_ORG, next);
+
+    // kategori default untuk pegawai baru
+    setPicCategory((prev) => {
+      const nextMap = { ...(prev || {}) };
+      nextMap[id] = defaultCategoryForPerson(person);
+      save(K_PIC_CAT, nextMap);
+      return nextMap;
+    });
+
     // buat key target & izin untuk pegawai baru
     ensureTargetsForProducts(productNames, [person]);
     ensureAllowedForProducts(productNames, [person], true);
+
     setNewEmp({ name: "", role: "SGP", unit: "MBM" });
   };
 
@@ -764,6 +800,13 @@ function InputPanel({
       const cur = { ...(prev || {}) };
       delete cur[id];
       save(K_ALLOWED, cur);
+      return cur;
+    });
+    // bersihkan kategori
+    setPicCategory((prev) => {
+      const cur = { ...(prev || {}) };
+      delete cur[id];
+      save(K_PIC_CAT, cur);
       return cur;
     });
     // hapus semua achievements pegawai ini
@@ -913,8 +956,292 @@ function InputPanel({
             </div>
           </Section>
 
-          {/* Kelola kolom/izin/target/pegawai ― (sama seperti sebelumnya) */}
-          {/* … (bagian ini dibiarkan sama; aku tidak potong untuk menghemat ruang) … */}
+          {/* Kelola kolom produk dinamis */}
+          <Section title="Kelola Kolom Produk (Target & Progress)">
+            <div className="grid md:grid-cols-4 gap-3 items-end">
+              <div className="md:col-span-2">
+                <div className="text-sm mb-1">Nama Produk</div>
+                <input
+                  className="px-3 py-2 rounded-xl border w-full"
+                  placeholder='mis: "KUM"'
+                  value={newProd}
+                  onChange={(e) => setNewProd(e.target.value)}
+                />
+              </div>
+              <div>
+                <div className="text-sm mb-1">Tipe</div>
+                <select
+                  className="px-3 py-2 rounded-xl border w-full"
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value as ProductType)}
+                >
+                  <option value="money">Money (Rp)</option>
+                  <option value="unit">Unit (pcs)</option>
+                </select>
+              </div>
+              <div>
+                <button className="px-3 py-2 rounded-xl border" onClick={addProduct}>
+                  Tambah Kolom
+                </button>
+              </div>
+            </div>
+
+            {productConfigs.length > 0 && (
+              <div className="mt-3 grid md:grid-cols-3 gap-2">
+                {productConfigs.map((cfg) => (
+                  <div
+                    key={cfg.name}
+                    className="px-3 py-2 rounded-xl border flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="font-medium">{cfg.name}</div>
+                      <div className="text-xs text-slate-500">
+                        {cfg.type === "money" ? "Money (Rp)" : "Unit"}
+                      </div>
+                    </div>
+                    <button
+                      className="p-1 rounded-lg border"
+                      onClick={() => removeProduct(cfg.name)}
+                      title="Hapus kolom"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="text-xs text-slate-500 mt-2">
+              * Menghapus kolom tidak menghapus data target/izin lama (tetap tersimpan).
+            </div>
+          </Section>
+
+          {/* Izin produk per pegawai */}
+          <Section title="Izin Produk per Pegawai">
+            <table className="w-full table-fixed text-sm">
+              <thead className="bg-slate-50 text-left">
+                <tr>
+                  <th className="p-2 w-[34%]">Nama</th>
+                  <th className="p-2 w-[18%]">Role</th>
+                  {productConfigs.map((cfg) => (
+                    <th key={cfg.name} className="p-2 text-center">
+                      {cfg.name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {org
+                  .filter((p) => p.unit !== "LEAD")
+                  .map((p) => (
+                    <tr key={p.id} className="border-t align-top">
+                      <td className="p-2 min-w-0 truncate">{p.name}</td>
+                      <td className="p-2 min-w-0 truncate text-slate-600">{p.role}</td>
+                      {productConfigs.map((cfg) => (
+                        <td key={cfg.name} className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={!!allowed?.[p.id]?.[cfg.name]}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setAllowed((prev) => {
+                                const cur = { ...(prev || {}) };
+                                cur[p.id] = cur[p.id] || {};
+                                cur[p.id][cfg.name] = checked;
+                                save(K_ALLOWED, cur);
+                                return { ...cur };
+                              });
+                            }}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            <div className="text-xs text-slate-500 mt-2">
+              Centang produk yang boleh dipasarkan oleh pegawai.
+            </div>
+          </Section>
+
+          {/* Kelompok PIC (MIKRO / OPERASIONAL) */}
+          <Section title="Kelompok PIC (Mikro / Operasional)">
+            <table className="w-full table-fixed text-sm">
+              <thead className="bg-slate-50 text-left">
+                <tr>
+                  <th className="p-2 w-[36%]">Nama</th>
+                  <th className="p-2 w-[20%]">Role</th>
+                  <th className="p-2 w-[24%]">Kategori</th>
+                </tr>
+              </thead>
+              <tbody>
+                {org
+                  .filter((p) => p.unit !== "LEAD")
+                  .map((p) => (
+                    <tr key={p.id} className="border-t">
+                      <td className="p-2 min-w-0 truncate">{p.name}</td>
+                      <td className="p-2 min-w-0 truncate text-slate-600">{p.role}</td>
+                      <td className="p-2">
+                        <select
+                          className="px-2 py-1 rounded-lg border"
+                          value={picCategory[p.id] || defaultCategoryForPerson(p)}
+                          onChange={(e) => {
+                            const val = e.target.value as PersonCategory;
+                            setPicCategory((prev) => {
+                              const next = { ...(prev || {}) };
+                              next[p.id] = val;
+                              save(K_PIC_CAT, next);
+                              return next;
+                            });
+                          }}
+                        >
+                          <option value="MIKRO">Mikro</option>
+                          <option value="OPERASIONAL">Operasional</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            <div className="text-xs text-slate-500 mt-2">
+              * Default: Security/SGK/SOCIAL ⇒ Operasional, lainnya ⇒ Mikro.
+            </div>
+          </Section>
+
+          {/* Target per ORANG per PRODUK (hanya aktif jika diizinkan) */}
+          <Section title="Target per Orang • per Produk">
+            <table className="w-full table-fixed text-sm">
+              <thead className="bg-slate-50 text-left">
+                <tr>
+                  <th className="p-2 w-[34%]">Nama</th>
+                  <th className="p-2 w-[18%]">Role</th>
+                  {productConfigs.map((cfg) => (
+                    <th key={cfg.name} className="p-2 text-right">
+                      {cfg.name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {org
+                  .filter((p) => p.unit !== "LEAD")
+                  .map((p) => (
+                    <tr key={p.id} className="border-t align-top">
+                      <td className="p-2 min-w-0 truncate">{p.name}</td>
+                      <td className="p-2 min-w-0 truncate text-slate-600">{p.role}</td>
+                      {productConfigs.map((cfg) => {
+                        const enabled = !!allowed?.[p.id]?.[cfg.name];
+                        return (
+                          <td key={cfg.name} className="p-2 text-right">
+                            <input
+                              className={`px-2 py-1 rounded-lg border w-32 text-right ${
+                                enabled ? "" : "bg-slate-100 text-slate-400"
+                              }`}
+                              type="number"
+                              inputMode="numeric"
+                              value={String(targets?.[p.id]?.[cfg.name] ?? "")}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(/[^\d]/g, "");
+                                setTargets((prev) => {
+                                  const cur = { ...(prev || {}) };
+                                  if (!cur[p.id]) cur[p.id] = {};
+                                  cur[p.id][cfg.name] = v ? Number(v) : 0;
+                                  save(K_TGT_PP, cur);
+                                  return { ...cur };
+                                });
+                              }}
+                              placeholder="0"
+                              title={cfg.type === "money" ? "Rupiah" : "Unit"}
+                              disabled={!enabled}
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            <div className="text-xs text-slate-500 mt-2">
+              * Hanya produk yang diizinkan yang bisa diisi targetnya.
+            </div>
+          </Section>
+
+          {/* Kelola Pegawai */}
+          <Section title="Kelola Pegawai">
+            <div className="grid md:grid-cols-5 gap-3 items-end">
+              <div className="md:col-span-2">
+                <div className="text-sm mb-1">Nama</div>
+                <input
+                  className="px-3 py-2 rounded-xl border w-full"
+                  value={newEmp.name}
+                  onChange={(e) => setNewEmp((v) => ({ ...v, name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <div className="text-sm mb-1">Role</div>
+                <input
+                  className="px-3 py-2 rounded-xl border w-full"
+                  placeholder="mis: SGP / Teller / CS"
+                  value={newEmp.role}
+                  onChange={(e) => setNewEmp((v) => ({ ...v, role: e.target.value }))}
+                />
+              </div>
+              <div>
+                <div className="text-sm mb-1">Unit</div>
+                <select
+                  className="px-3 py-2 rounded-xl border w-full"
+                  value={newEmp.unit}
+                  onChange={(e) =>
+                    setNewEmp((v) => ({ ...v, unit: e.target.value as Person["unit"] }))
+                  }
+                >
+                  <option value="MBM">MBM</option>
+                  <option value="BOS">BOS</option>
+                  <option value="SOCIAL">SOCIAL</option>
+                  <option value="SGK">SGK</option>
+                </select>
+              </div>
+              <div>
+                <button className="px-3 py-2 rounded-xl border" onClick={addEmployee}>
+                  Tambah Pegawai
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <table className="w-full table-fixed text-sm">
+                <thead className="bg-slate-50 text-left">
+                  <tr>
+                    <th className="p-2 w-[36%]">Nama</th>
+                    <th className="p-2 w-[20%]">Role</th>
+                    <th className="p-2 w-[16%]">Unit</th>
+                    <th className="p-2 w-[12%] text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {org.map((p) => (
+                    <tr key={p.id} className="border-t">
+                      <td className="p-2 min-w-0 truncate">{p.name}</td>
+                      <td className="p-2 min-w-0 truncate text-slate-600">{p.role}</td>
+                      <td className="p-2">{p.unit}</td>
+                      <td className="p-2 text-right">
+                        <button
+                          className="px-2 py-1 rounded-lg border"
+                          onClick={() => deleteEmployee(p.id)}
+                          disabled={p.unit === "LEAD"}
+                          title={p.unit === "LEAD" ? "LEAD tidak bisa dihapus" : "Hapus pegawai"}
+                        >
+                          Hapus
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="text-xs text-slate-500 mt-2">
+                * Menghapus pegawai akan menghapus perolehan, target, izin, dan kategori PIC terkait.
+              </div>
+            </div>
+          </Section>
 
           <Section title="Log Input Terbaru">
             <table className="w-full table-fixed text-sm">
@@ -941,7 +1268,7 @@ function InputPanel({
                         <td className="p-2 text-right whitespace-nowrap">{nfmt(a.amount)}</td>
                         <td className="p-2">
                           <button
-                            className="px-2 py-1 text-white rounded-lg border"
+                            className="px-2 py-1 rounded-lg border"
                             onClick={() => removeAchievement(a.id)}
                           >
                             Hapus
@@ -967,11 +1294,13 @@ function PicInputPage({
   org,
   products,
   allowed,
+  picCategory,
   onAdded,
 }: {
   org: Person[];
   products: ProductConfig[];
   allowed: AllowedMap;
+  picCategory: PersonCategoryMap;
   onAdded?: (row: Achievement) => void;
 }) {
   const nav = useNavigate();
@@ -979,20 +1308,21 @@ function PicInputPage({
   type Kategori = "Mikro" | "Operasional";
   const [kategori, setKategori] = useState<Kategori>("Mikro");
 
-  // filter orang sesuai kategori:
-  const isOperasional = (p: Person) =>
-    p.role.toLowerCase().includes("security") || p.unit === "SGK" || p.unit === "SOCIAL";
   const filteredPeople = useMemo(
-    () => org.filter((p) => p.unit !== "LEAD").filter((p) => (kategori === "Operasional" ? isOperasional(p) : !isOperasional(p))),
-    [org, kategori],
+    () =>
+      org.filter(
+        (p) =>
+          p.unit !== "LEAD" &&
+          (picCategory?.[p.id] || defaultCategoryForPerson(p)) ===
+            (kategori === "Operasional" ? "OPERASIONAL" : "MIKRO"),
+      ),
+    [org, kategori, picCategory],
   );
 
   const [personId, setPersonId] = useState<string>("");
   const allowedProducts = useMemo(
     () =>
-      personId
-        ? products.filter((cfg) => !!allowed?.[personId]?.[cfg.name])
-        : [],
+      personId ? products.filter((cfg) => !!allowed?.[personId]?.[cfg.name]) : [],
     [personId, products, allowed],
   );
 
@@ -1059,7 +1389,7 @@ function PicInputPage({
                 <option value="Operasional">Operasional</option>
               </select>
               <div className="text-xs text-slate-500 mt-1">
-                Operasional = Security, SGK, Bansos. Sisanya masuk Mikro.
+                Sumber: pengelompokan BM (Kelompok PIC).
               </div>
             </div>
 
@@ -1153,54 +1483,29 @@ function PicInputPage({
 }
 
 /* ===================================================
-   APP ROOT with ROUTES
+   PORTAL (Dashboard) — memakai state bersama dari App
    =================================================== */
 
-function PortalApp() {
-  const DEFAULT_PRODUCT_CONFIG: ProductConfig[] = [
-    { name: "KUR", type: "money" },
-    { name: "LIVIN", type: "unit" },
-    { name: "AXA", type: "unit" },
-  ];
-
-  // daftar pegawai dari DB (fallback local storage)
-  const [org, setOrg] = useState<Person[]>(() => load<Person[]>(K_ORG, DEFAULT_ORG));
-  // produk dari DB (fallback local)
-  const [productConfigs, setProductConfigs] = useState<ProductConfig[]>(() =>
-    load<ProductConfig[]>(K_FP, DEFAULT_PRODUCT_CONFIG),
-  );
-  // achievements dari DB (fallback local)
+function PortalApp({
+  org,
+  setOrg,
+  productConfigs,
+  setProductConfigs,
+  allowed,
+  setAllowed,
+  picCategory,
+  setPicCategory,
+}: {
+  org: Person[];
+  setOrg: Dispatch<SetStateAction<Person[]>>;
+  productConfigs: ProductConfig[];
+  setProductConfigs: Dispatch<SetStateAction<ProductConfig[]>>;
+  allowed: AllowedMap;
+  setAllowed: Dispatch<SetStateAction<AllowedMap>>;
+  picCategory: PersonCategoryMap;
+  setPicCategory: Dispatch<SetStateAction<PersonCategoryMap>>;
+}) {
   const [ach, setAch] = useState<Achievement[]>(load<Achievement[]>(K_ACH, []));
-
-  // muat dari API
-  useEffect(() => {
-    (async () => {
-      try {
-        const p = await api<{ ok: boolean; rows: Person[] }>("/api/persons");
-        if (p?.ok) {
-          setOrg(p.rows);
-          save(K_ORG, p.rows);
-        }
-      } catch {}
-      try {
-        const pr = await api<{ ok: boolean; rows: ProductConfig[] }>("/api/products");
-        if (pr?.ok) {
-          setProductConfigs(pr.rows);
-          save(K_FP, pr.rows);
-        }
-      } catch {}
-      try {
-        const a = await api<{ ok: boolean; rows: Achievement[] }>(
-          "/api/achievements?limit=500",
-        );
-        if (a?.ok) {
-          setAch(a.rows);
-          save(K_ACH, a.rows);
-        }
-      } catch {}
-    })();
-  }, []);
-
   const [pinOk, setPinOk] = useState<boolean>(load<boolean>(K_PINOK, false));
   const [tab, setTab] = useState<
     "Overview" | "MBM" | "BOS" | "SOCIAL" | "SGK" | "Individuals" | "Input"
@@ -1209,10 +1514,6 @@ function PortalApp() {
   // target per orang-per produk (masih lokal)
   const [targets, setTargets] = useState<TargetsPP>(() => load<TargetsPP>(K_TGT_PP, {}));
   useEffect(() => save(K_TGT_PP, targets), [targets]);
-
-  // izin per orang-per produk (masih lokal)
-  const [allowed, setAllowed] = useState<AllowedMap>(() => load<AllowedMap>(K_ALLOWED, {}));
-  useEffect(() => save(K_ALLOWED, allowed), [allowed]);
 
   // sinkronisasi saat daftar produk berubah
   useEffect(() => {
@@ -1262,7 +1563,7 @@ function PortalApp() {
     date: string;
   }>(() => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() }));
 
-  // POST ke DB (versi baru)
+  // POST ke DB saat tambah
   const addAchievement = async () => {
     if (!form.personId || !form.product || !form.amount)
       return alert("Lengkapi data.");
@@ -1305,6 +1606,35 @@ function PortalApp() {
       return f;
     });
   }, [form.personId, productConfigs, allowed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load awal dari API (org, products, achievements)
+  useEffect(() => {
+    (async () => {
+      try {
+        const p = await api<{ ok: boolean; rows: Person[] }>("/api/persons");
+        if (p?.ok && p.rows?.length) {
+          setOrg(p.rows);
+          save(K_ORG, p.rows);
+        }
+      } catch {}
+      try {
+        const pr = await api<{ ok: boolean; rows: ProductConfig[] }>("/api/products");
+        if (pr?.ok && pr.rows?.length) {
+          setProductConfigs(pr.rows);
+          save(K_FP, pr.rows);
+        }
+      } catch {}
+      try {
+        const a = await api<{ ok: boolean; rows: Achievement[] }>(
+          "/api/achievements?limit=500",
+        );
+        if (a?.ok && Array.isArray(a.rows)) {
+          setAch(a.rows);
+          save(K_ACH, a.rows);
+        }
+      } catch {}
+    })();
+  }, [setOrg, setProductConfigs]);
 
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900">
@@ -1437,11 +1767,13 @@ function PortalApp() {
             org={org}
             setOrg={setOrg}
             setAch={setAch}
+            picCategory={picCategory}
+            setPicCategory={setPicCategory}
           />
         )}
 
         <footer className="pt-6 text-sm text-slate-500 flex items-center gap-2">
-          <CheckCircle2 size={16} /> Progress & konfigurasi target/izin masih lokal.
+          <CheckCircle2 size={16} /> Progress & konfigurasi target/izin disimpan lokal.
           Input perolehan tersimpan ke DB.
         </footer>
       </main>
@@ -1449,33 +1781,62 @@ function PortalApp() {
   );
 }
 
-export default function App() {
-  // dua halaman: dashboard dan /pic
-  // supaya 1 file saja, kita pakai Routes di sini.
-  const [org, setOrg] = useState<Person[]>([]);
-  const [products, setProducts] = useState<ProductConfig[]>([]);
-  const [allowed] = useState<AllowedMap>(() => load<AllowedMap>(K_ALLOWED, {}));
+/* ===================================================
+   APP ROOT – state bersama (org, produk, izin, kategori) + ROUTES
+   =================================================== */
 
-  // preload minimal untuk PIC (biar cepat)
+export default function App() {
+  // State bersama agar perubahan BM langsung terlihat di halaman PIC
+  const [org, setOrg] = useState<Person[]>(() => load<Person[]>(K_ORG, DEFAULT_ORG));
+  const [productConfigs, setProductConfigs] = useState<ProductConfig[]>(() =>
+    load<ProductConfig[]>(K_FP, DEFAULT_PRODUCT_CONFIG),
+  );
+  const [allowed, setAllowed] = useState<AllowedMap>(() => load<AllowedMap>(K_ALLOWED, {}));
+  const [picCategory, setPicCategory] = useState<PersonCategoryMap>(() =>
+    load<PersonCategoryMap>(K_PIC_CAT, {}),
+  );
+
+  // Pastikan semua pegawai punya kategori (default heuristik)
   useEffect(() => {
-    (async () => {
-      try {
-        const p = await api<{ ok: boolean; rows: Person[] }>("/api/persons");
-        if (p?.ok) setOrg(p.rows);
-      } catch {}
-      try {
-        const pr = await api<{ ok: boolean; rows: ProductConfig[] }>("/api/products");
-        if (pr?.ok) setProducts(pr.rows);
-      } catch {}
-    })();
-  }, []);
+    setPicCategory((prev) => {
+      const next = { ...(prev || {}) };
+      org.forEach((p) => {
+        if (p.unit === "LEAD") return;
+        if (!next[p.id]) next[p.id] = defaultCategoryForPerson(p);
+      });
+      save(K_PIC_CAT, next);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org.map((o) => o.id).join("|")]);
 
   return (
     <Routes>
-      <Route path="/" element={<PortalApp />} />
+      <Route
+        path="/"
+        element={
+          <PortalApp
+            org={org}
+            setOrg={setOrg}
+            productConfigs={productConfigs}
+            setProductConfigs={setProductConfigs}
+            allowed={allowed}
+            setAllowed={setAllowed}
+            picCategory={picCategory}
+            setPicCategory={setPicCategory}
+          />
+        }
+      />
       <Route
         path="/pic"
-        element={<PicInputPage org={org} products={products} allowed={allowed} />}
+        element={
+          <PicInputPage
+            org={org}
+            products={productConfigs}
+            allowed={allowed}
+            picCategory={picCategory}
+          />
+        }
       />
     </Routes>
   );
