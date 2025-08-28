@@ -1076,7 +1076,7 @@ function InputPanel({
                 </select>
               </div>
               <div>
-                <button className="px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700" onClick={addEmployee}>
+                <button className="text-white px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700" onClick={addEmployee}>
                   Tambah Pegawai
                 </button>
               </div>
