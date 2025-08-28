@@ -17,21 +17,20 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === "POST") {
       const { id, personId, product, amount, date } = req.body ?? {};
-      if (!id || !personId || !product || amount == null || !date)
+      if (!id || !personId || !product || amount == null || !date) {
         return res.status(400).json({ error: "Bad payload" });
-
+      }
       await sql/*sql*/`
         INSERT INTO achievements (id, person_id, product, amount, date)
-        VALUES (${id}, ${personId}, ${product}, ${amount}, ${date});
+        VALUES (${id}, ${personId}, ${product}, ${amount}, ${date})
+        ON CONFLICT (id) DO NOTHING;
       `;
       return res.status(201).json({ ok: true });
     }
 
     if (req.method === "DELETE") {
       const { id } = req.query;
-      if (!id || Array.isArray(id))
-        return res.status(400).json({ error: "Missing id" });
-
+      if (!id || Array.isArray(id)) return res.status(400).json({ error: "Missing id" });
       await sql`DELETE FROM achievements WHERE id=${id}`;
       return res.status(200).json({ ok: true });
     }
