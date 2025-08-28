@@ -1417,7 +1417,7 @@ function InputPanel({
 
             <div className="mt-4">
               <table className="w-full table-fixed text-sm">
-                <thead className="bg-slate-50 text-left">
+                <thead className="text-white bg-slate-50 text-left">
                   <tr>
                     <th className="p-2 w-[36%]">Nama</th>
                     <th className="p-2 w-[20%]">Role</th>
@@ -1433,7 +1433,7 @@ function InputPanel({
                       <td className="p-2">{p.unit}</td>
                       <td className="p-2 text-right">
                         <button
-                          className="px-2 py-1 rounded-lg border"
+                          className="text-white px-2 py-1 rounded-lg border"
                           onClick={() => deleteEmployee(p.id)}
                           disabled={p.unit === "LEAD"}
                           title={p.unit === "LEAD" ? "LEAD tidak bisa dihapus" : "Hapus pegawai"}
@@ -1457,7 +1457,7 @@ function InputPanel({
           >
             <div className="grid md:grid-cols-5 gap-3 items-end">
               <div className="md:col-span-2">
-                <div className="text-sm mb-1">Bulan</div>
+                <div className=" text-white text-sm mb-1">Bulan</div>
                 <input
                   className="px-3 py-2 rounded-xl border w-full"
                   type="month"
@@ -1466,7 +1466,7 @@ function InputPanel({
                 />
               </div>
               <div className="flex gap-2 md:col-span-3">
-                <button className="px-3 py-2 rounded-xl border" onClick={exportMonthCSV}>
+                <button className="text white px-3 py-2 rounded-xl border" onClick={exportMonthCSV}>
                   Download Rekap (CSV)
                 </button>
                 <button
