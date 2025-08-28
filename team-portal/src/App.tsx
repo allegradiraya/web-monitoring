@@ -794,7 +794,7 @@ function InputPanel({
           <Section
             title="Input Perolehan (BM Only)"
             extra={
-              <button className="px-3 py-1.5 rounded-lg bg-slate-800 text-white border border-slate-700" onClick={() => setPinOk(false)}>
+              <button className="text-white px-3 py-1.5 rounded-lg bg-slate-800 text-white border border-slate-700" onClick={() => setPinOk(false)}>
                 <Lock size={14} /> Kunci
               </button>
             }
@@ -893,7 +893,7 @@ function InputPanel({
                 </select>
               </div>
               <div>
-                <button className="px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700" onClick={addProduct}>
+                <button className="text-white px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700" onClick={addProduct}>
                   Tambah Kolom
                 </button>
               </div>
@@ -1134,7 +1134,7 @@ function InputPanel({
                         <td className="p-2 min-w-0 break-words">{a.product}</td>
                         <td className="p-2 text-right whitespace-nowrap">{nfmt(a.amount)}</td>
                         <td className="p-2">
-                          <button className="px-2 py-1 rounded-lg bg-rose-600 text-white border border-rose-600 hover:bg-rose-700" onClick={() => removeAchievement(a.id)}>
+                          <button className="text-white px-2 py-1 rounded-lg bg-rose-600 text-white border border-rose-600 hover:bg-rose-700" onClick={() => removeAchievement(a.id)}>
                             Hapus
                           </button>
                         </td>
