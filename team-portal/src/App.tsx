@@ -102,7 +102,7 @@ function unitTotalForProducts(
 }
 
 /* =========================================================
-   WINDOW WIDTH + COL WIDTH CALC (AUTO FIT)
+   WINDOW WIDTH + COL WIDTH CALC (AUTO FIT + COMPACT)
 ========================================================= */
 function useWindowWidth() {
   const [w, setW] = useState<number>(typeof window !== "undefined" ? window.innerWidth : 1280);
@@ -117,13 +117,13 @@ function useWindowWidth() {
 // left sticky total width: Nama (180) + Role (120) + padding
 const LEFT_W = 180 + 120 + 60; // ~360px
 
-function calcColW(totalCols: number, viewport: number) {
+function calcColW(totalCols: number, viewport: number, compact: boolean) {
   if (totalCols <= 0) return 160;
-  // sisakan margin/scrollbar ~120px
   const usable = Math.max(500, viewport - LEFT_W - 120);
   const ideal = Math.floor(usable / totalCols);
-  // batasi agar tetap nyaman dibaca
-  return Math.max(140, Math.min(240, ideal));
+  const MIN = compact ? 120 : 140;
+  const MAX = compact ? 200 : 240;
+  return Math.max(MIN, Math.min(MAX, ideal));
 }
 
 /* =========================================================
@@ -189,7 +189,7 @@ function PBar({ value, target }: { value: number; target: number }) {
 }
 
 /* =========================================================
-   TABLE CELLS
+   TABLE ROW
 ========================================================= */
 function ProductCell({ value, target, isMoney }: { value: number; target: number; isMoney: boolean }) {
   return (
@@ -201,7 +201,7 @@ function ProductCell({ value, target, isMoney }: { value: number; target: number
 }
 
 function PersonRow({
-  p, ppIdx, targets, productConfigs, allowed, colW
+  p, ppIdx, targets, productConfigs, allowed, colW, compact
 }: {
   p: Person;
   ppIdx: Map<string, Map<string, number>>;
@@ -209,23 +209,23 @@ function PersonRow({
   productConfigs: ProductConfig[];
   allowed: AllowedMap;
   colW: number;
+  compact: boolean;
 }) {
+  const pad = compact ? "p-1" : "p-2";
   return (
     <tr className="border-t align-top">
-      {/* sticky: lebih sempit */}
-      <td className="p-2 font-medium min-w-[180px] sticky left-0 bg-white z-10">{p.name}</td>
-      <td className="p-2 text-slate-600 min-w-[120px] sticky left-[180px] bg-white z-10">{p.role}</td>
-
+      <td className={`${pad} font-medium min-w-[180px] sticky left-0 bg-white z-10`}>{p.name}</td>
+      <td className={`${pad} text-slate-600 min-w-[120px] sticky left-[180px] bg-white z-10`}>{p.role}</td>
       {productConfigs.map(cfg => {
         const isAllowed = !!allowed?.[p.id]?.[cfg.name];
         if (!isAllowed) {
-          return <td key={cfg.name} className="p-2 align-top text-slate-400" style={{ minWidth: colW }}>—</td>;
+          return <td key={cfg.name} className={`${pad} align-top text-slate-400`} style={{ minWidth: colW }}>—</td>;
         }
         const val = getPP(ppIdx, p.id, cfg.name);
         const tgt = getTarget(targets, p.id, cfg.name);
         const isMoney = cfg.type === "money";
         return (
-          <td key={cfg.name} className="p-2 align-top" style={{ minWidth: colW }}>
+          <td key={cfg.name} className={`${pad} align-top`} style={{ minWidth: colW }}>
             <ProductCell value={val} target={tgt} isMoney={isMoney} />
           </td>
         );
@@ -297,16 +297,17 @@ async function apiSyncPersons(persons: Person[]) {
 }
 
 /* =========================================================
-   OVERVIEW — SATU TABEL
+   OVERVIEW — SATU KOTAK + COMPACT
 ========================================================= */
 function Overview({
-  ach, targets, productConfigs, allowed, org
+  ach, targets, productConfigs, allowed, org, compact
 }: {
   ach: Achievement[];
   targets: TargetsPP;
   productConfigs: ProductConfig[];
   allowed: AllowedMap;
   org: Person[];
+  compact: boolean;
 }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
   const peopleAll = useMemo(() => org.filter(p => p.unit !== "LEAD"), [org]);
@@ -316,19 +317,22 @@ function Overview({
   );
 
   const width = useWindowWidth();
-  const colW = calcColW(colsALL.length, width);
+  const colW = calcColW(colsALL.length, width, compact);
   const tableMinW = LEFT_W + colsALL.length * colW;
+
+  const pad = compact ? "p-1" : "p-2";
+  const headTxt = compact ? "text-[12px]" : "text-sm";
 
   return (
     <Section title="Overview Semua Pegawai">
       <div className="overflow-x-auto">
-        <table className="w-full table-fixed text-sm" style={{ minWidth: tableMinW }}>
+        <table className={`w-full table-fixed ${headTxt}`} style={{ minWidth: tableMinW }}>
           <thead className="bg-slate-50 text-left">
             <tr>
-              <th className="p-2 min-w-[180px] sticky left-0 bg-slate-50 z-10">Nama</th>
-              <th className="p-2 min-w-[120px] sticky left-[180px] bg-slate-50 z-10">Role</th>
+              <th className={`${pad} min-w-[180px] sticky left-0 bg-slate-50 z-10`}>Nama</th>
+              <th className={`${pad} min-w-[120px] sticky left-[180px] bg-slate-50 z-10`}>Role</th>
               {colsALL.map(cfg => (
-                <th key={cfg.name} className="p-2 text-right" style={{ width: colW }}>{cfg.name}</th>
+                <th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>
               ))}
             </tr>
           </thead>
@@ -342,6 +346,7 @@ function Overview({
                 productConfigs={colsALL}
                 allowed={allowed}
                 colW={colW}
+                compact={compact}
               />
             ))}
           </tbody>
@@ -396,12 +401,12 @@ function Individuals({
 }
 
 /* =========================================================
-   INPUT PANEL (BM) — Target Table diperlebar + auto-col
+   INPUT PANEL (BM) — Target Table ikut compact
 ========================================================= */
 function InputPanel({
   pinOk, setPinOk, form, setForm, addAchievement, ach, removeAchievement,
   targets, setTargets, productConfigs, setProductConfigs, allowed, setAllowed,
-  org, setOrg, setAch, importLegacyOnce
+  org, setOrg, setAch, importLegacyOnce, compact
 }: {
   pinOk: boolean;
   setPinOk: Dispatch<SetStateAction<boolean>>;
@@ -420,6 +425,7 @@ function InputPanel({
   setOrg: Dispatch<SetStateAction<Person[]>>;
   setAch: Dispatch<SetStateAction<Achievement[]>>;
   importLegacyOnce: () => void;
+  compact: boolean;
 }) {
   const [newProd, setNewProd] = useState("");
   const [newType, setNewType] = useState<ProductType>("money");
@@ -507,8 +513,11 @@ function InputPanel({
   };
 
   const width = useWindowWidth();
-  const colW = calcColW(productConfigs.length, width);
+  const colW = calcColW(productConfigs.length, width, compact);
   const targetTableMinW = LEFT_W + productConfigs.length * colW;
+
+  const pad = compact ? "p-1" : "p-2";
+  const headTxt = compact ? "text-[12px]" : "text-sm";
 
   return (
     <div className="space-y-4">
@@ -630,30 +639,30 @@ function InputPanel({
             )}
           </Section>
 
-          {/* Target per orang per produk — AUTO WIDTH + input full */}
+          {/* Target per orang per produk — AUTO WIDTH + input full + compact */}
           <Section title="Target per Orang • per Produk">
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed text-sm" style={{ minWidth: targetTableMinW }}>
+              <table className={`w-full table-fixed ${headTxt}`} style={{ minWidth: targetTableMinW }}>
                 <thead className="bg-slate-50 text-left">
                   <tr>
-                    <th className="p-2 min-w-[180px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                    <th className="p-2 min-w-[120px] sticky left-[180px] bg-slate-50 z-10">Role</th>
+                    <th className={`${pad} min-w-[180px] sticky left-0 bg-slate-50 z-10`}>Nama</th>
+                    <th className={`${pad} min-w-[120px] sticky left-[180px] bg-slate-50 z-10`}>Role</th>
                     {productConfigs.map(cfg => (
-                      <th key={cfg.name} className="p-2 text-right" style={{ width: colW }}>{cfg.name}</th>
+                      <th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {org.filter(p => p.unit !== "LEAD").map(p => (
                     <tr key={p.id} className="border-t align-top">
-                      <td className="p-2 min-w-[180px] sticky left-0 bg-white z-10">{p.name}</td>
-                      <td className="p-2 min-w-[120px] sticky left-[180px] bg-white z-10 text-slate-600">{p.role}</td>
+                      <td className={`${pad} min-w-[180px] sticky left-0 bg-white z-10`}>{p.name}</td>
+                      <td className={`${pad} min-w-[120px] sticky left-[180px] bg-white z-10 text-slate-600`}>{p.role}</td>
                       {productConfigs.map(cfg => {
                         const enabled = !!allowed?.[p.id]?.[cfg.name];
                         return (
-                          <td key={cfg.name} className="p-2 text-right" style={{ minWidth: colW }}>
+                          <td key={cfg.name} className={`${pad} text-right`} style={{ minWidth: colW }}>
                             <input
-                              className={`px-2 py-1 rounded-lg border w-full text-right ${enabled ? "" : "bg-slate-100 text-slate-400"}`}
+                              className={`px-2 ${compact ? "py-0.5" : "py-1"} rounded-lg border w-full text-right ${enabled ? "" : "bg-slate-100 text-slate-400"}`}
                               type="number" inputMode="numeric"
                               value={String(targets?.[p.id]?.[cfg.name] ?? "")}
                               onChange={(e) => {
@@ -814,6 +823,10 @@ export default function App() {
   const [allowed, setAllowed] = useState<AllowedMap>(() => load<AllowedMap>(K_ALLOWED, {}));
   useEffect(() => save(K_ALLOWED, allowed), [allowed]);
 
+  // Compact mode (persist locally)
+  const [compact, setCompact] = useState<boolean>(() => load<boolean>("tm_compact_mode", false));
+  useEffect(() => save("tm_compact_mode", compact), [compact]);
+
   // Sinkronisasi target/izin saat produk/pegawai berubah
   useEffect(() => {
     const names = productConfigs.map(c => c.name);
@@ -909,6 +922,18 @@ export default function App() {
 
           <div className="flex-1" />
 
+          {/* Compact toggle */}
+          <div className="flex items-center gap-2 mr-2">
+            <span className="text-sm text-slate-600">Compact</span>
+            <button
+              onClick={() => setCompact(v => !v)}
+              className={`w-12 h-6 rounded-full border transition relative ${compact ? "bg-indigo-600 border-indigo-600" : "bg-slate-200 border-slate-300"}`}
+              aria-label="Toggle compact mode"
+            >
+              <span className={`absolute top-0.5 ${compact ? "right-0.5" : "left-0.5"} w-5 h-5 rounded-full bg-white shadow transition`} />
+            </button>
+          </div>
+
           {/* NAV */}
           <nav className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(["Overview","Individuals","Input"] as const).map(t => (
@@ -963,6 +988,7 @@ export default function App() {
             productConfigs={productConfigs}
             allowed={allowed}
             org={orgRef.current}
+            compact={compact}
           />
         )}
 
@@ -995,6 +1021,7 @@ export default function App() {
             setOrg={setOrgState}
             setAch={setAch}
             importLegacyOnce={() => {}}
+            compact={compact}
           />
         )}
 
