@@ -1,7 +1,6 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSql } from "./_db";
 
-export default async function handler(_req: VercelRequest, res: VercelResponse) {
+export default async function handler(_req: any, res: any) {
   try {
     const sql = getSql();
 
