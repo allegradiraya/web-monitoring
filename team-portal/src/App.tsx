@@ -25,7 +25,7 @@ type AllowedMap = Record<string, Record<string, boolean>>;
 type TargetsPP = Record<string, Record<string, number>>;
 
 /* =========================================================
-   DEFAULT DATA + HELPERS (localStorage helpers)
+   DEFAULT DATA + HELPERS
 ========================================================= */
 const uid = () => Math.random().toString(36).slice(2, 9);
 
@@ -46,7 +46,7 @@ const DEFAULT_ORG: Person[] = [
 ];
 
 const K_ORG = "tm_org_v1";
-const K_ACH = "tm_achievements"; // dipakai hanya untuk migrasi lama -> DB
+const K_ACH = "tm_achievements";
 const K_PINOK = "tm_pin_ok";
 const K_TGT_PP = "tm_targets_pp";
 const K_FP = "tm_featured_products_v2";
@@ -99,6 +99,31 @@ function unitTotalForProducts(
     if (!set.has(a.product.toLowerCase())) return sum;
     return sum + (Number(a.amount) || 0);
   }, 0);
+}
+
+/* =========================================================
+   WINDOW WIDTH + COL WIDTH CALC (AUTO FIT)
+========================================================= */
+function useWindowWidth() {
+  const [w, setW] = useState<number>(typeof window !== "undefined" ? window.innerWidth : 1280);
+  useEffect(() => {
+    const onR = () => setW(window.innerWidth);
+    window.addEventListener("resize", onR);
+    return () => window.removeEventListener("resize", onR);
+  }, []);
+  return w;
+}
+
+// left sticky total width: Nama (180) + Role (120) + padding
+const LEFT_W = 180 + 120 + 60; // ~360px
+
+function calcColW(totalCols: number, viewport: number) {
+  if (totalCols <= 0) return 160;
+  // sisakan margin/scrollbar ~120px
+  const usable = Math.max(500, viewport - LEFT_W - 120);
+  const ideal = Math.floor(usable / totalCols);
+  // batasi agar tetap nyaman dibaca
+  return Math.max(140, Math.min(240, ideal));
 }
 
 /* =========================================================
@@ -176,30 +201,31 @@ function ProductCell({ value, target, isMoney }: { value: number; target: number
 }
 
 function PersonRow({
-  p, ppIdx, targets, productConfigs, allowed
+  p, ppIdx, targets, productConfigs, allowed, colW
 }: {
   p: Person;
   ppIdx: Map<string, Map<string, number>>;
   targets: TargetsPP;
   productConfigs: ProductConfig[];
   allowed: AllowedMap;
+  colW: number;
 }) {
   return (
     <tr className="border-t align-top">
-      {/* sticky left cols */}
-      <td className="p-2 font-medium min-w-[220px] sticky left-0 bg-white z-10">{p.name}</td>
-      <td className="p-2 text-slate-600 min-w-[140px] sticky left-[220px] bg-white z-10">{p.role}</td>
+      {/* sticky: lebih sempit */}
+      <td className="p-2 font-medium min-w-[180px] sticky left-0 bg-white z-10">{p.name}</td>
+      <td className="p-2 text-slate-600 min-w-[120px] sticky left-[180px] bg-white z-10">{p.role}</td>
 
       {productConfigs.map(cfg => {
         const isAllowed = !!allowed?.[p.id]?.[cfg.name];
-        if (!isAllowed) return (
-          <td key={cfg.name} className="p-2 align-top text-slate-400 min-w-[160px]">—</td>
-        );
+        if (!isAllowed) {
+          return <td key={cfg.name} className="p-2 align-top text-slate-400" style={{ minWidth: colW }}>—</td>;
+        }
         const val = getPP(ppIdx, p.id, cfg.name);
         const tgt = getTarget(targets, p.id, cfg.name);
         const isMoney = cfg.type === "money";
         return (
-          <td key={cfg.name} className="p-2 align-top min-w-[160px]">
+          <td key={cfg.name} className="p-2 align-top" style={{ minWidth: colW }}>
             <ProductCell value={val} target={tgt} isMoney={isMoney} />
           </td>
         );
@@ -209,24 +235,13 @@ function PersonRow({
 }
 
 /* =========================================================
-   HELPERS: visible columns & CSV
+   HELPERS
 ========================================================= */
-function visibleProductsForUnit(
-  people: Person[],
-  productConfigs: ProductConfig[],
-  allowed: AllowedMap
-): ProductConfig[] {
-  return productConfigs.filter(cfg =>
-    people.some(p => !!allowed?.[p.id]?.[cfg.name])
-  );
-}
-
 function visibleProductsForAll(
   people: Person[],
   productConfigs: ProductConfig[],
   allowed: AllowedMap
 ): ProductConfig[] {
-  // union dari semua produk yang diizinkan minimal oleh 1 pegawai
   const set = new Set<string>();
   people.forEach(p => {
     productConfigs.forEach(cfg => {
@@ -241,7 +256,7 @@ function makeCSV(rows: any[], headers: string[]) {
     if (v == null) return "";
     const s = String(v).replace(/"/g, '""');
     return /[",\n]/.test(s) ? `"${s}"` : s;
-    };
+  };
   return [headers.join(","), ...rows.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
 }
 
@@ -282,154 +297,65 @@ async function apiSyncPersons(persons: Person[]) {
 }
 
 /* =========================================================
-   OVERVIEW — DIGABUNG 1 TABEL
+   OVERVIEW — SATU TABEL
 ========================================================= */
 function Overview({
-  ach, unitTotal, targets, productConfigs, allowed, org
+  ach, targets, productConfigs, allowed, org
 }: {
   ach: Achievement[];
-  unitTotal: (u: Person["unit"]) => number;
   targets: TargetsPP;
   productConfigs: ProductConfig[];
   allowed: AllowedMap;
   org: Person[];
 }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
-  const microKURKUM = useMemo(
-    () => unitTotalForProducts(ach, "MBM", MICRO_INCLUDED_PRODUCTS, org),
-    [ach, org]
-  );
-
-  const peopleAll = useMemo(
-    () => org.filter(p => p.unit !== "LEAD"),
-    [org]
-  );
+  const peopleAll = useMemo(() => org.filter(p => p.unit !== "LEAD"), [org]);
   const colsALL = useMemo(
     () => visibleProductsForAll(peopleAll, productConfigs, allowed),
     [peopleAll, productConfigs, allowed]
   );
 
-  const minW = { minWidth: 360 + colsALL.length * 160 };
+  const width = useWindowWidth();
+  const colW = calcColW(colsALL.length, width);
+  const tableMinW = LEFT_W + colsALL.length * colW;
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Stat icon={<Users size={18} />} label="Total Anggota" value={org.length - 1} />
-        <Stat icon={<ClipboardList size={18} />} label="Input (bulan ini)"
-          value={ach.filter(a => a.date.slice(0, 7) === today().slice(0, 7)).length} />
-        <Stat icon={<TargetIcon size={18} />} label="Micro (KUR+KUM/MBM)" value={nfmt(microKURKUM)} />
+    <Section title="Overview Semua Pegawai">
+      <div className="overflow-x-auto">
+        <table className="w-full table-fixed text-sm" style={{ minWidth: tableMinW }}>
+          <thead className="bg-slate-50 text-left">
+            <tr>
+              <th className="p-2 min-w-[180px] sticky left-0 bg-slate-50 z-10">Nama</th>
+              <th className="p-2 min-w-[120px] sticky left-[180px] bg-slate-50 z-10">Role</th>
+              {colsALL.map(cfg => (
+                <th key={cfg.name} className="p-2 text-right" style={{ width: colW }}>{cfg.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {peopleAll.map(p => (
+              <PersonRow
+                key={p.id}
+                p={p}
+                ppIdx={ppIdx}
+                targets={targets}
+                productConfigs={colsALL}
+                allowed={allowed}
+                colW={colW}
+              />
+            ))}
+          </tbody>
+        </table>
       </div>
-
-      <Section title="Overview Semua Pegawai">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm" style={minW}>
-            <thead className="bg-slate-50 text-left">
-              <tr>
-                <th className="p-2 min-w-[220px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                <th className="p-2 min-w-[140px] sticky left-[220px] bg-slate-50 z-10">Role</th>
-                {colsALL.map(cfg => (
-                  <th key={cfg.name} className="p-2 w-[160px] text-right">{cfg.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {peopleAll.map(p => (
-                <PersonRow
-                  key={p.id}
-                  p={p}
-                  ppIdx={ppIdx}
-                  targets={targets}
-                  productConfigs={colsALL}
-                  allowed={allowed}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {colsALL.length === 0 && (
-          <div className="text-xs text-slate-500 mt-2">Belum ada produk yang diizinkan untuk siapapun.</div>
-        )}
-      </Section>
-    </div>
+      {colsALL.length === 0 && (
+        <div className="text-xs text-slate-500 mt-2">Belum ada produk yang diizinkan.</div>
+      )}
+    </Section>
   );
 }
 
 /* =========================================================
-   UNIT BOARD (tetap ada bila kamu butuh per unit)
-========================================================= */
-function UnitBoard({
-  unit, title, ach, unitTotal, targets, productConfigs, allowed, org
-}: {
-  unit: Person["unit"];
-  title: string;
-  ach: Achievement[];
-  unitTotal: (u: Person["unit"]) => number;
-  targets: TargetsPP;
-  productConfigs: ProductConfig[];
-  allowed: AllowedMap;
-  org: Person[];
-}) {
-  const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
-
-  const people = org.filter(byUnit(unit));
-  const cols = visibleProductsForUnit(people, productConfigs, allowed);
-  const minW = { minWidth: 360 + cols.length * 160 };
-
-  return (
-    <div className="space-y-4">
-      <Section title={title} extra={<div className="text-sm text-slate-500">Total unit: {nfmt(unitTotal(unit))}</div>}>
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm" style={minW}>
-            <thead className="bg-slate-50 text-left">
-              <tr>
-                <th className="p-2 min-w-[220px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                <th className="p-2 min-w-[140px] sticky left-[220px] bg-slate-50 z-10">Role</th>
-                {cols.map(cfg => (
-                  <th key={cfg.name} className="p-2 w-[160px] text-right">{cfg.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {people.map(p => (
-                <PersonRow key={p.id} p={p} ppIdx={ppIdx} targets={targets} productConfigs={cols} allowed={allowed} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Section>
-
-      <Section title="Detail Input Terakhir">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm min-w-[800px]">
-            <thead className="bg-slate-50 text-left">
-              <tr>
-                <th className="p-2 w-[180px]">Tanggal</th>
-                <th className="p-2 w-[240px]">Nama</th>
-                <th className="p-2 w-[320px]">Produk</th>
-                <th className="p-2 w-[140px] text-right">Nilai</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ach
-                .filter(a => org.find(p => p.id === a.personId)?.unit === unit)
-                .slice(-25).reverse().map(a => (
-                  <tr key={a.id} className="border-t align-top">
-                    <td className="p-2 whitespace-nowrap">{a.date}</td>
-                    <td className="p-2 min-w-0 truncate">{org.find(p => p.id === a.personId)?.name}</td>
-                    <td className="p-2 min-w-0 break-words">{a.product}</td>
-                    <td className="p-2 text-right whitespace-nowrap">{nfmt(a.amount)}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </Section>
-    </div>
-  );
-}
-
-/* =========================================================
-   INDIVIDUALS
+   INDIVIDUALS (unchanged)
 ========================================================= */
 function Individuals({
   ach, productConfigs, targets, allowed, org
@@ -470,7 +396,7 @@ function Individuals({
 }
 
 /* =========================================================
-   INPUT PANEL (BM)
+   INPUT PANEL (BM) — Target Table diperlebar + auto-col
 ========================================================= */
 function InputPanel({
   pinOk, setPinOk, form, setForm, addAchievement, ach, removeAchievement,
@@ -580,7 +506,10 @@ function InputPanel({
     setForm(f => (f.personId === id ? { ...f, personId: "", product: "" } : f));
   };
 
-  // --- UI
+  const width = useWindowWidth();
+  const colW = calcColW(productConfigs.length, width);
+  const targetTableMinW = LEFT_W + productConfigs.length * colW;
+
   return (
     <div className="space-y-4">
       {!pinOk ? (
@@ -663,7 +592,7 @@ function InputPanel({
             </div>
           </Section>
 
-          {/* Kelola kolom produk */}
+          {/* Kolom produk */}
           <Section title="Kelola Kolom Produk (Target & Progress)">
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <div className="md:col-span-2">
@@ -701,65 +630,28 @@ function InputPanel({
             )}
           </Section>
 
-          {/* Izin per orang per produk */}
-          <Section title="Izin Produk per Pegawai">
-            <div className="overflow-x-auto">
-              <table className="w-full table-fixed text-sm" style={{ minWidth: 360 + productConfigs.length * 120 }}>
-                <thead className="bg-slate-50 text-left">
-                  <tr>
-                    <th className="p-2 min-w-[260px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                    <th className="p-2 min-w-[160px] sticky left-[260px] bg-slate-50 z-10">Role</th>
-                    {productConfigs.map(cfg => (<th key={cfg.name} className="p-2 text-center min-w-[120px]">{cfg.name}</th>))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {org.filter(p => p.unit !== "LEAD").map(p => (
-                    <tr key={p.id} className="border-t align-top">
-                      <td className="p-2 min-w-[260px] sticky left-0 bg-white z-10">{p.name}</td>
-                      <td className="p-2 min-w-[160px] sticky left-[260px] bg-white z-10 text-slate-600">{p.role}</td>
-                      {productConfigs.map(cfg => (
-                        <td key={cfg.name} className="p-2 text-center min-w-[120px]">
-                          <input type="checkbox"
-                            checked={!!allowed?.[p.id]?.[cfg.name]}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setAllowed(prev => {
-                                const cur = { ...(prev || {}) };
-                                cur[p.id] = cur[p.id] || {};
-                                cur[p.id][cfg.name] = checked;
-                                save(K_ALLOWED, cur);
-                                return { ...cur };
-                              });
-                            }} />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Section>
-
-          {/* Target per orang per produk — FIX anti menumpuk */}
+          {/* Target per orang per produk — AUTO WIDTH + input full */}
           <Section title="Target per Orang • per Produk">
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed text-sm" style={{ minWidth: 420 + productConfigs.length * 160 }}>
+              <table className="w-full table-fixed text-sm" style={{ minWidth: targetTableMinW }}>
                 <thead className="bg-slate-50 text-left">
                   <tr>
-                    <th className="p-2 min-w-[260px] sticky left-0 bg-slate-50 z-10">Nama</th>
-                    <th className="p-2 min-w-[160px] sticky left-[260px] bg-slate-50 z-10">Role</th>
-                    {productConfigs.map(cfg => (<th key={cfg.name} className="p-2 text-right min-w-[160px]">{cfg.name}</th>))}
+                    <th className="p-2 min-w-[180px] sticky left-0 bg-slate-50 z-10">Nama</th>
+                    <th className="p-2 min-w-[120px] sticky left-[180px] bg-slate-50 z-10">Role</th>
+                    {productConfigs.map(cfg => (
+                      <th key={cfg.name} className="p-2 text-right" style={{ width: colW }}>{cfg.name}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {org.filter(p => p.unit !== "LEAD").map(p => (
                     <tr key={p.id} className="border-t align-top">
-                      <td className="p-2 min-w-[260px] sticky left-0 bg-white z-10">{p.name}</td>
-                      <td className="p-2 min-w-[160px] sticky left-[260px] bg-white z-10 text-slate-600">{p.role}</td>
+                      <td className="p-2 min-w-[180px] sticky left-0 bg-white z-10">{p.name}</td>
+                      <td className="p-2 min-w-[120px] sticky left-[180px] bg-white z-10 text-slate-600">{p.role}</td>
                       {productConfigs.map(cfg => {
                         const enabled = !!allowed?.[p.id]?.[cfg.name];
                         return (
-                          <td key={cfg.name} className="p-2 text-right min-w-[160px]">
+                          <td key={cfg.name} className="p-2 text-right" style={{ minWidth: colW }}>
                             <input
                               className={`px-2 py-1 rounded-lg border w-full text-right ${enabled ? "" : "bg-slate-100 text-slate-400"}`}
                               type="number" inputMode="numeric"
@@ -849,7 +741,7 @@ function InputPanel({
             </div>
           </Section>
 
-          {/* Log Input Terbaru + tombol impor local legacy */}
+          {/* Log Input Terbaru */}
           <Section title="Log Input Terbaru" extra={
             <div className="flex gap-2">
               <Btn className="!bg-emerald-600" onClick={importLegacyOnce}><Download size={16}/> Impor Ach Lama ke DB (sekali)</Btn>
@@ -901,16 +793,15 @@ export default function App() {
     { name: "AXA", type: "unit" },
   ];
 
-  const [org, setOrg] = useState<Person>(() => null as any) as any; // to satisfy TS initial
+  const [org, setOrg] = useState<Person>(() => null as any) as any;
   const orgRef = useRef<Person[]>(load<Person[]>(K_ORG, DEFAULT_ORG));
   const [orgState, setOrgState] = useState<Person[]>(orgRef.current);
-  useEffect(() => { setOrg(orgState as any); }, [orgState]); // compatibility alias
+  useEffect(() => { setOrg(orgState as any); }, [orgState]);
   useEffect(() => save(K_ORG, orgState), [orgState]);
 
-  // ACHIEVEMENTS — sumber kebenaran: DB (Neon)
   const [ach, setAch] = useState<Achievement[]>([]);
   const [pinOk, setPinOk] = useState<boolean>(load<boolean>(K_PINOK, false));
-  const [tab, setTab] = useState<"Overview" | "MBM" | "BOS" | "SOCIAL" | "SGK" | "Individuals" | "Input">("Overview");
+  const [tab, setTab] = useState<"Overview" | "Individuals" | "Input">("Overview");
 
   const [productConfigs, setProductConfigs] = useState<ProductConfig[]>(
     () => load<ProductConfig[]>(K_FP, DEFAULT_PRODUCT_CONFIG)
@@ -923,7 +814,7 @@ export default function App() {
   const [allowed, setAllowed] = useState<AllowedMap>(() => load<AllowedMap>(K_ALLOWED, {}));
   useEffect(() => save(K_ALLOWED, allowed), [allowed]);
 
-  // Sinkronisasi target/izin saat daftar produk berubah
+  // Sinkronisasi target/izin saat produk/pegawai berubah
   useEffect(() => {
     const names = productConfigs.map(c => c.name);
     setTargets(prev => {
@@ -951,32 +842,26 @@ export default function App() {
 
   useEffect(() => save(K_PINOK, pinOk), [pinOk]);
 
-  // FETCH DB on mount (current month by default)
+  // FETCH DB (per bulan)
   const [month, setMonth] = useState(() => {
     const d = new Date(); d.setDate(1);
-    return ymd(d).slice(0, 7); // YYYY-MM
+    return ymd(d).slice(0, 7);
   });
   const refreshFromDB = async () => {
     const [y, m] = month.split("-");
     const from = `${y}-${m}-01`;
-    const to = ymd(new Date(Number(y), Number(m), 1)); // first day next month
+    const to = ymd(new Date(Number(y), Number(m), 1));
     const rows = await apiGetAchievements(from, to);
     setAch(rows);
   };
   useEffect(() => { refreshFromDB(); }, [month]);
 
-  // SYNC persons to DB everytime orgState changes (debounced)
+  // DB sync persons (debounce)
   useEffect(() => {
     orgRef.current = orgState;
     const t = setTimeout(() => { apiSyncPersons(orgState).catch(() => {}); }, 300);
     return () => clearTimeout(t);
   }, [orgState]);
-
-  // Statistik unit
-  const totalsByPerson = useMemo(() => sumByPerson(ach), [ach]);
-  const unitTotal = (unit: Person["unit"]) =>
-    orgState.filter(p => p.unit === unit && !["MBM", "BOS", "BM"].includes(p.role))
-      .reduce((s, p) => s + (totalsByPerson.get(p.id) || 0), 0);
 
   // Input form
   const [form, setForm] = useState<{ personId: string; product: string; amount: string; date: string }>(
@@ -999,7 +884,6 @@ export default function App() {
     setAch(s => s.filter(x => x.id !== id));
   };
 
-  // Menjaga pilihan produk tetap valid saat person berubah
   useEffect(() => {
     setForm(f => {
       if (!f.personId) return f;
@@ -1008,22 +892,7 @@ export default function App() {
       if (!names.includes(f.product)) return { ...f, product: names[0] };
       return f;
     });
-  }, [form.personId, productConfigs, allowed]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Legacy importer — migrasikan K_ACH lama (localStorage) ke DB (sekali tekan)
-  const importLegacyOnce = async () => {
-    const legacy = load<Achievement[]>(K_ACH, []);
-    if (!legacy.length) { alert("Tidak ada data legacy di localStorage."); return; }
-    if (!confirm(`Impor ${legacy.length} achievement lama ke database?`)) return;
-    for (const a of legacy) {
-      try {
-        await apiPostAchievement({ personId: a.personId, product: a.product, amount: a.amount, date: a.date });
-      } catch { /* ignore duplicates */ }
-    }
-    localStorage.removeItem(K_ACH);
-    await refreshFromDB();
-    alert("Selesai diimpor ke DB.");
-  };
+  }, [form.personId, productConfigs, allowed]); // eslint-disable-line
 
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900">
@@ -1040,9 +909,9 @@ export default function App() {
 
           <div className="flex-1" />
 
-          {/* NAV — teks putih */}
+          {/* NAV */}
           <nav className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {(["Overview","MBM","BOS","SOCIAL","SGK","Individuals","Input"] as const).map(t => (
+            {(["Overview","Individuals","Input"] as const).map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -1058,7 +927,6 @@ export default function App() {
 
       {/* MAIN */}
       <main className="w-full px-6 py-4 space-y-4">
-        {/* Bar rekap + export CSV bulan ini */}
         <Section
           title="Rekap Bulanan & Leaderboard (Fair Ranking)"
           extra={<div className="text-sm text-slate-500">CSV bisa dibuka di Excel</div>}
@@ -1071,7 +939,6 @@ export default function App() {
               onChange={(e) => setMonth(e.target.value)}
             />
             <Btn className="!bg-indigo-600" onClick={async () => {
-              // export CSV untuk bulan yang sedang dipilih
               const [y, m] = month.split("-");
               const from = `${y}-${m}-01`;
               const to = ymd(new Date(Number(y), Number(m), 1));
@@ -1085,68 +952,20 @@ export default function App() {
               a.href = url; a.download = `rekap_${month}.csv`; a.click();
               URL.revokeObjectURL(url);
             }}><Download size={16}/> Download Rekap (CSV)</Btn>
-            <Btn className="!bg-slate-700" onClick={refreshFromDB}><RefreshCcw size={16}/> Refresh</Btn>
+            <Btn className="!bg-slate-700" onClick={async () => { await refreshFromDB(); }}><RefreshCcw size={16}/> Refresh</Btn>
           </div>
         </Section>
 
         {tab === "Overview" && (
           <Overview
             ach={ach}
-            unitTotal={unitTotal}
             targets={targets}
             productConfigs={productConfigs}
             allowed={allowed}
             org={orgRef.current}
           />
         )}
-        {tab === "MBM" && (
-          <UnitBoard
-            unit="MBM"
-            title="Dashboard MBM (SGP)"
-            ach={ach}
-            unitTotal={unitTotal}
-            targets={targets}
-            productConfigs={productConfigs}
-            allowed={allowed}
-            org={orgRef.current}
-          />
-        )}
-        {tab === "BOS" && (
-          <UnitBoard
-            unit="BOS"
-            title="Dashboard BOS (Teller/CS/Security)"
-            ach={ach}
-            unitTotal={unitTotal}
-            targets={targets}
-            productConfigs={productConfigs}
-            allowed={allowed}
-            org={orgRef.current}
-          />
-        )}
-        {tab === "SOCIAL" && (
-          <UnitBoard
-            unit="SOCIAL"
-            title="Dashboard Bantuan Sosial"
-            ach={ach}
-            unitTotal={unitTotal}
-            targets={targets}
-            productConfigs={productConfigs}
-            allowed={allowed}
-            org={orgRef.current}
-          />
-        )}
-        {tab === "SGK" && (
-          <UnitBoard
-            unit="SGK"
-            title="Dashboard SGK (Galih Putra)"
-            ach={ach}
-            unitTotal={unitTotal}
-            targets={targets}
-            productConfigs={productConfigs}
-            allowed={allowed}
-            org={orgRef.current}
-          />
-        )}
+
         {tab === "Individuals" && (
           <Individuals
             ach={ach}
@@ -1156,6 +975,7 @@ export default function App() {
             org={orgRef.current}
           />
         )}
+
         {tab === "Input" && (
           <InputPanel
             pinOk={pinOk}
@@ -1174,7 +994,7 @@ export default function App() {
             org={orgRef.current}
             setOrg={setOrgState}
             setAch={setAch}
-            importLegacyOnce={importLegacyOnce}
+            importLegacyOnce={() => {}}
           />
         )}
 
