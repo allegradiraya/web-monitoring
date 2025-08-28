@@ -1,10 +1,8 @@
 export default async function handler(_req: any, res: any) {
-  // Tunjukkan env mana yang ada
   const has_DATABASE_URL = !!process.env.DATABASE_URL;
   const has_POSTGRES_URL_NON_POOLING = !!process.env.POSTGRES_URL_NON_POOLING;
   const has_POSTGRES_URL = !!process.env.POSTGRES_URL;
 
-  // Hitung host dari URL yang DIPILIH (prioritas non-pooling)
   const chosen =
     process.env.POSTGRES_URL_NON_POOLING ??
     process.env.DATABASE_URL ??
