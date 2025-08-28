@@ -1967,7 +1967,7 @@ function PortalApp({
 
       {/* MAIN */}
       <main className="w-full px-6 py-4 space-y-4">
-        <div className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="text-white flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(["Overview", "MBM", "BOS", "SOCIAL", "SGK", "Individuals", "Input"] as const).map(
             (t) => (
               <button
