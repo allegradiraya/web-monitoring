@@ -3,6 +3,7 @@ import { sql } from "./_db";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const sql = getSql(); 
     if (req.method === "GET") {
       const rows = await sql`SELECT * FROM products ORDER BY name;`;
       return res.status(200).json(rows);
