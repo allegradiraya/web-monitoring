@@ -1,18 +1,13 @@
 import { neon, neonConfig } from "@neondatabase/serverless";
-
 neonConfig.fetchConnectionCache = true;
 
-// Pakai env yang tersedia di Vercel:
-// - DATABASE_URL (kalau kamu berhasil menambahkannya), atau
-// - POSTGRES_URL_NON_POOLING (dari Neon, non-pooler), atau
-// - POSTGRES_URL (fallback, pooler)
-const url =
-  process.env.DATABASE_URL ||
-  process.env.POSTGRES_URL_NON_POOLING ||
-  process.env.POSTGRES_URL;
+export function getSql() {
+  // SELALU pilih non-pooling jika ada
+  const url =
+    process.env.POSTGRES_URL_NON_POOLING ??
+    process.env.DATABASE_URL ??
+    process.env.POSTGRES_URL;
 
-if (!url) {
-  throw new Error("Missing DATABASE_URL/POSTGRES_URL env");
+  if (!url) throw new Error("Missing DATABASE_URL / POSTGRES_URL(_NON_POOLING)");
+  return neon(url);
 }
-
-export const sql = neon(url);
