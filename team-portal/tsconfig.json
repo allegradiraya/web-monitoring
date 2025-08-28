@@ -5,6 +5,10 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
 
     "strict": true,
     "noEmit": true,
@@ -21,6 +25,8 @@
     "paths": { "@/*": ["./src/*"] },
 
     "types": ["vite/client", "react", "react-dom"]
+    "types": ["vite/client", "node"]
   },
-  "include": ["src"]
+  "include": ["src", "api/**/*.ts"]
 }
+
