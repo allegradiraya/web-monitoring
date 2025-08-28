@@ -1,14 +1,30 @@
+// team-portal/api/health.ts
 export default async function handler(_req: any, res: any) {
   try {
-    // import dinamis supaya jika modul gagal, bisa kita tangkap
-    const { getSql, pickDbUrl } = await import("./_db").catch((e) => {
-      throw new Error(`db_import_failed: ${e?.message || e}`);
-    });
+    // ESM: coba import dengan ekstensi .js (build output), lalu fallback ke .ts/no-ext untuk dev
+    const mod =
+      (await import(/* @vite-ignore */ "./_db.js").catch(() => null)) ??
+      (await import("./_db").catch(() => null));
 
-    const sql = getSql(); // jika URL/driver bermasalah, akan ter-throw di sini
+    if (!mod) {
+      throw new Error("db_import_failed: compiled module not found");
+    }
 
+    const { getSql, pickDbUrl } = mod as {
+      getSql: () => any;
+      pickDbUrl: () => string;
+    };
+
+    const sql = getSql();
     const [row] = await sql`select now() as now, version() as pg_version`;
-    const host = (() => { try { return new URL(pickDbUrl()).host; } catch { return null; } })();
+    const host = (() => {
+      try {
+        return new URL(pickDbUrl()).host;
+      } catch {
+        return null;
+      }
+    })();
+
     res.status(200).json({ ok: true, host, ...row });
   } catch (e: any) {
     console.error("health error:", e);
