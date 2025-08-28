@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Users, ClipboardList, Target as TargetIcon, Lock, Unlock, Plus, Shield, CheckCircle2, X, Download, RefreshCcw } from "lucide-react";
+import { Lock, Unlock, Plus, CheckCircle2, X, Download, RefreshCcw } from "lucide-react";
 
 /* =========================================================
    TYPES
@@ -114,9 +114,7 @@ function useWindowWidth() {
   return w;
 }
 
-// left sticky total width: Nama (180) + Role (120) + padding
-const LEFT_W = 180 + 120 + 60; // ~360px
-
+const LEFT_W = 180 + 120 + 60; // Nama(180) + Role(120) + padding
 function calcColW(totalCols: number, viewport: number, compact: boolean) {
   if (totalCols <= 0) return 160;
   const usable = Math.max(500, viewport - LEFT_W - 120);
@@ -127,7 +125,7 @@ function calcColW(totalCols: number, viewport: number, compact: boolean) {
 }
 
 /* =========================================================
-   SMALL UI ATOMS
+   UI ATOMS
 ========================================================= */
 const Btn = ({
   children, onClick, className = "", title, type = "button" as "button" | "submit", disabled
@@ -151,18 +149,6 @@ const Btn = ({
   >
     {children}
   </button>
-);
-
-const Stat = ({ icon, label, value }: { icon: ReactNode; label: string; value: string | number }) => (
-  <div className="p-4 rounded-2xl bg-white border shadow-sm">
-    <div className="flex items-center gap-3">
-      <div className="p-2 bg-slate-100 rounded-xl">{icon}</div>
-      <div>
-        <div className="text-xl font-semibold">{value}</div>
-        <div className="text-slate-500 text-sm">{label}</div>
-      </div>
-    </div>
-  </div>
 );
 
 const Section = ({ title, children, extra }: { title: string; children: ReactNode; extra?: ReactNode }) => (
@@ -242,13 +228,13 @@ function visibleProductsForAll(
   productConfigs: ProductConfig[],
   allowed: AllowedMap
 ): ProductConfig[] {
-  const set = new Set<string>();
-  people.forEach(p => {
-    productConfigs.forEach(cfg => {
-      if (allowed?.[p.id]?.[cfg.name]) set.add(cfg.name);
-    });
-  });
-  return productConfigs.filter(cfg => set.has(cfg.name));
+  const shown = new Set<string>();
+  for (const p of people) {
+    for (const cfg of productConfigs) {
+      if (allowed?.[p.id]?.[cfg.name]) shown.add(cfg.name);
+    }
+  }
+  return productConfigs.filter(cfg => shown.has(cfg.name));
 }
 
 function makeCSV(rows: any[], headers: string[]) {
@@ -297,12 +283,13 @@ async function apiSyncPersons(persons: Person[]) {
 }
 
 /* =========================================================
-   OVERVIEW — SATU KOTAK + COMPACT
+   OVERVIEW — SATU KOTAK (SEMUA PEGAWAI)
 ========================================================= */
 function Overview({
-  ach, targets, productConfigs, allowed, org, compact
+  ach, unitTotal, targets, productConfigs, allowed, org, compact
 }: {
   ach: Achievement[];
+  unitTotal: (u: Person["unit"]) => number; // tidak dipakai, dipertahankan agar kompatibel
   targets: TargetsPP;
   productConfigs: ProductConfig[];
   allowed: AllowedMap;
@@ -310,15 +297,20 @@ function Overview({
   compact: boolean;
 }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
-  const peopleAll = useMemo(() => org.filter(p => p.unit !== "LEAD"), [org]);
-  const colsALL = useMemo(
+
+  const peopleAll = useMemo(
+    () => org.filter(p => p.unit !== "LEAD" && !["MBM","BOS","BM"].includes(p.role)),
+    [org]
+  );
+
+  const cols = useMemo(
     () => visibleProductsForAll(peopleAll, productConfigs, allowed),
     [peopleAll, productConfigs, allowed]
   );
 
   const width = useWindowWidth();
-  const colW = calcColW(colsALL.length, width, compact);
-  const tableMinW = LEFT_W + colsALL.length * colW;
+  const colW = calcColW(cols.length, width, compact);
+  const tableMinW = LEFT_W + cols.length * colW;
 
   const pad = compact ? "p-1" : "p-2";
   const headTxt = compact ? "text-[12px]" : "text-sm";
@@ -331,7 +323,7 @@ function Overview({
             <tr>
               <th className={`${pad} min-w-[180px] sticky left-0 bg-slate-50 z-10`}>Nama</th>
               <th className={`${pad} min-w-[120px] sticky left-[180px] bg-slate-50 z-10`}>Role</th>
-              {colsALL.map(cfg => (
+              {cols.map(cfg => (
                 <th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>
               ))}
             </tr>
@@ -343,7 +335,7 @@ function Overview({
                 p={p}
                 ppIdx={ppIdx}
                 targets={targets}
-                productConfigs={colsALL}
+                productConfigs={cols}
                 allowed={allowed}
                 colW={colW}
                 compact={compact}
@@ -352,7 +344,7 @@ function Overview({
           </tbody>
         </table>
       </div>
-      {colsALL.length === 0 && (
+      {cols.length === 0 && (
         <div className="text-xs text-slate-500 mt-2">Belum ada produk yang diizinkan.</div>
       )}
     </Section>
@@ -360,7 +352,7 @@ function Overview({
 }
 
 /* =========================================================
-   INDIVIDUALS (unchanged)
+   INDIVIDUALS (tetap)
 ========================================================= */
 function Individuals({
   ach, productConfigs, targets, allowed, org
@@ -401,7 +393,7 @@ function Individuals({
 }
 
 /* =========================================================
-   INPUT PANEL (BM) — Target Table ikut compact
+   INPUT PANEL (BM) — ikut compact
 ========================================================= */
 function InputPanel({
   pinOk, setPinOk, form, setForm, addAchievement, ach, removeAchievement,
@@ -639,7 +631,7 @@ function InputPanel({
             )}
           </Section>
 
-          {/* Target per orang per produk — AUTO WIDTH + input full + compact */}
+          {/* Target per orang per produk */}
           <Section title="Target per Orang • per Produk">
             <div className="overflow-x-auto">
               <table className={`w-full table-fixed ${headTxt}`} style={{ minWidth: targetTableMinW }}>
@@ -823,7 +815,7 @@ export default function App() {
   const [allowed, setAllowed] = useState<AllowedMap>(() => load<AllowedMap>(K_ALLOWED, {}));
   useEffect(() => save(K_ALLOWED, allowed), [allowed]);
 
-  // Compact mode (persist locally)
+  // Compact mode (persist)
   const [compact, setCompact] = useState<boolean>(() => load<boolean>("tm_compact_mode", false));
   useEffect(() => save("tm_compact_mode", compact), [compact]);
 
@@ -907,6 +899,12 @@ export default function App() {
     });
   }, [form.personId, productConfigs, allowed]); // eslint-disable-line
 
+  // Statistik unit (dibiarkan jika diperlukan di masa depan)
+  const totalsByPerson = useMemo(() => sumByPerson(ach), [ach]);
+  const unitTotal = (unit: Person["unit"]) =>
+    orgState.filter(p => p.unit === unit && !["MBM", "BOS", "BM"].includes(p.role))
+      .reduce((s, p) => s + (totalsByPerson.get(p.id) || 0), 0);
+
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900">
       {/* HEADER */}
@@ -977,13 +975,14 @@ export default function App() {
               a.href = url; a.download = `rekap_${month}.csv`; a.click();
               URL.revokeObjectURL(url);
             }}><Download size={16}/> Download Rekap (CSV)</Btn>
-            <Btn className="!bg-slate-700" onClick={async () => { await refreshFromDB(); }}><RefreshCcw size={16}/> Refresh</Btn>
+            <Btn className="!bg-slate-700" onClick={refreshFromDB}><RefreshCcw size={16}/> Refresh</Btn>
           </div>
         </Section>
 
         {tab === "Overview" && (
           <Overview
             ach={ach}
+            unitTotal={unitTotal}
             targets={targets}
             productConfigs={productConfigs}
             allowed={allowed}
@@ -1010,7 +1009,7 @@ export default function App() {
             setForm={setForm}
             addAchievement={addAchievement}
             ach={ach}
-            removeAchievement={removeAchievement}
+            removeAchievement={async (id) => { await apiDeleteAchievement(id); setAch(s => s.filter(x => x.id !== id)); }}
             targets={targets}
             setTargets={setTargets}
             productConfigs={productConfigs}
@@ -1020,7 +1019,17 @@ export default function App() {
             org={orgRef.current}
             setOrg={setOrgState}
             setAch={setAch}
-            importLegacyOnce={() => {}}
+            importLegacyOnce={async () => {
+              const legacy = load<Achievement[]>(K_ACH, []);
+              if (!legacy.length) { alert("Tidak ada data legacy di localStorage."); return; }
+              if (!confirm(`Impor ${legacy.length} achievement lama ke database?`)) return;
+              for (const a of legacy) {
+                try { await apiPostAchievement({ personId: a.personId, product: a.product, amount: a.amount, date: a.date }); } catch {}
+              }
+              localStorage.removeItem(K_ACH);
+              await refreshFromDB();
+              alert("Selesai diimpor ke DB.");
+            }}
             compact={compact}
           />
         )}
