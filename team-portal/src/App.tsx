@@ -1201,7 +1201,7 @@ function InputPanel({
                       </div>
                     </div>
                     <button
-                      className="p-1 rounded-lg border"
+                      className="text-white p-1 rounded-lg border"
                       onClick={() => removeProduct(cfg.name)}
                       title="Hapus kolom"
                     >
@@ -1445,7 +1445,7 @@ function InputPanel({
                   ))}
                 </tbody>
               </table>
-              <div className="text-xs text-slate-500 mt-2">
+              <div className="text-white text-xs text-slate-500 mt-2">
                 * Menghapus pegawai akan menghapus perolehan, target, izin, dan kategori PIC terkait.
               </div>
             </div>
