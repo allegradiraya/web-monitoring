@@ -289,7 +289,7 @@ function Overview({
   ach, unitTotal, targets, productConfigs, allowed, org, compact
 }: {
   ach: Achievement[];
-  unitTotal: (u: Person["unit"]) => number; // tidak dipakai, dipertahankan agar kompatibel
+  unitTotal: (u: Person["unit"]) => number;
   targets: TargetsPP;
   productConfigs: ProductConfig[];
   allowed: AllowedMap;
@@ -352,7 +352,7 @@ function Overview({
 }
 
 /* =========================================================
-   INDIVIDUALS (tetap)
+   INDIVIDUALS
 ========================================================= */
 function Individuals({
   ach, productConfigs, targets, allowed, org
@@ -393,7 +393,123 @@ function Individuals({
 }
 
 /* =========================================================
-   INPUT PANEL (BM) — ikut compact
+   PIC INPUT (untuk tim, tanpa PIN)
+========================================================= */
+function PicInput({
+  form, setForm, addAchievement, ach, allowed, productConfigs, org
+}: {
+  form: { personId: string; product: string; amount: string; date: string };
+  setForm: Dispatch<SetStateAction<{ personId: string; product: string; amount: string; date: string }>>;
+  addAchievement: () => void;
+  ach: Achievement[];
+  allowed: AllowedMap;
+  productConfigs: ProductConfig[];
+  org: Person[];
+}) {
+  const allowedListForSelected = form.personId
+    ? productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(c => c.name)
+    : [];
+  const canAdd = !!form.personId && !!form.product && !!form.amount &&
+    (!!allowed?.[form.personId]?.[form.product]);
+
+  return (
+    <div className="space-y-4">
+      <Section title="Input Perolehan (PIC / Tim)">
+        <div className="grid md:grid-cols-4 gap-3 items-end">
+          <div>
+            <div className="text-sm mb-1">Nama</div>
+            <select className="px-3 py-2 rounded-xl border w-full"
+              value={form.personId}
+              onChange={e => setForm({ ...form, personId: e.target.value })}
+            >
+              <option value="">— Pilih —</option>
+              {org.filter(p => p.unit !== "LEAD").map(p => (
+                <option key={p.id} value={p.id}>{p.name} ({p.role})</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div className="text-sm mb-1">Produk</div>
+            <select className="px-3 py-2 rounded-xl border w-full"
+              value={form.product}
+              onChange={e => setForm({ ...form, product: e.target.value })}
+              disabled={!form.personId || productConfigs.length === 0 || allowedListForSelected.length === 0}
+            >
+              <option value="">
+                {!form.personId ? "Pilih nama dulu"
+                  : allowedListForSelected.length ? "— Pilih Produk —"
+                  : "Pegawai ini belum diizinkan produk apapun"}
+              </option>
+              {productConfigs
+                .filter(cfg => !!allowed?.[form.personId]?.[cfg.name])
+                .map(cfg => (<option key={cfg.name} value={cfg.name}>{cfg.name}</option>))}
+            </select>
+          </div>
+
+          <div>
+            <div className="text-sm mb-1">Nilai</div>
+            <input className="px-3 py-2 rounded-xl border w-full"
+              type="number" inputMode="numeric" placeholder="contoh: 5000000 / 1"
+              value={form.amount}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const sanitized = raw.replace(/[^\d]/g, "");
+                setForm({ ...form, amount: sanitized });
+              }} />
+          </div>
+
+          <div>
+            <div className="text-sm mb-1">Tanggal</div>
+            <input className="px-3 py-2 rounded-xl border w-full" type="date"
+              value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+          </div>
+
+          <div className="md:col-span-4">
+            <Btn
+              className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
+              onClick={() => { if (canAdd) addAchievement(); }}
+              disabled={!canAdd}
+            >
+              <Plus size={16} /> Tambah
+            </Btn>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Log Input Terbaru (PIC)">
+        <div className="overflow-x-auto">
+          <table className="w-full table-fixed text-sm min-w-[900px]">
+            <thead className="bg-slate-50 text-left">
+              <tr>
+                <th className="p-2 w-[180px]">Tanggal</th>
+                <th className="p-2 w-[240px]">Nama</th>
+                <th className="p-2 w-[320px]">Produk</th>
+                <th className="p-2 w-[140px] text-right">Nilai</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ach.slice(-25).reverse().map(a => {
+                const p = org.find(x => x.id === a.personId)!;
+                return (
+                  <tr key={a.id} className="border-t align-top">
+                    <td className="p-2 whitespace-nowrap">{a.date}</td>
+                    <td className="p-2 min-w-0 truncate">{p?.name}</td>
+                    <td className="p-2 min-w-0 break-words">{a.product}</td>
+                    <td className="p-2 text-right whitespace-nowrap">{nfmt(a.amount)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+/* =========================================================
+   INPUT PANEL (BM) — lengkap + PIN
 ========================================================= */
 function InputPanel({
   pinOk, setPinOk, form, setForm, addAchievement, ach, removeAchievement,
@@ -593,7 +709,7 @@ function InputPanel({
             </div>
           </Section>
 
-          {/* Kolom produk */}
+          {/* Kelola kolom produk */}
           <Section title="Kelola Kolom Produk (Target & Progress)">
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <div className="md:col-span-2">
@@ -717,7 +833,7 @@ function InputPanel({
                     <th className="p-2 w-[36%]">Nama</th>
                     <th className="p-2 w-[20%]">Role</th>
                     <th className="p-2 w-[16%]">Unit</th>
-                    <th className="p-2 w-[12%] text-right">Aksi</th>
+                    <th className="p-2 w-[12%]">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -726,7 +842,7 @@ function InputPanel({
                       <td className="p-2 min-w-0 truncate">{p.name}</td>
                       <td className="p-2 min-w-0 truncate text-slate-600">{p.role}</td>
                       <td className="p-2">{p.unit}</td>
-                      <td className="p-2 text-right">
+                      <td className="p-2">
                         <Btn className={`!bg-red-600 ${p.unit === "LEAD" ? "!bg-slate-300" : ""}`}
                           onClick={() => deleteEmployee(p.id)} title="Hapus pegawai" >
                           Hapus
@@ -802,7 +918,7 @@ export default function App() {
 
   const [ach, setAch] = useState<Achievement[]>([]);
   const [pinOk, setPinOk] = useState<boolean>(load<boolean>(K_PINOK, false));
-  const [tab, setTab] = useState<"Overview" | "Individuals" | "Input">("Overview");
+  const [tab, setTab] = useState<"Overview" | "Individuals" | "PIC" | "Input">("Overview");
 
   const [productConfigs, setProductConfigs] = useState<ProductConfig[]>(
     () => load<ProductConfig[]>(K_FP, DEFAULT_PRODUCT_CONFIG)
@@ -868,8 +984,12 @@ export default function App() {
     return () => clearTimeout(t);
   }, [orgState]);
 
-  // Input form
+  // Form BM
   const [form, setForm] = useState<{ personId: string; product: string; amount: string; date: string }>(
+    () => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() })
+  );
+  // Form PIC
+  const [picForm, setPicForm] = useState<{ personId: string; product: string; amount: string; date: string }>(
     () => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() })
   );
 
@@ -884,11 +1004,23 @@ export default function App() {
     setForm(f => ({ ...f, amount: "" }));
   };
 
+  const addAchievementPIC = async () => {
+    if (!picForm.personId || !picForm.product || !picForm.amount) return alert("Lengkapi data.");
+    if (!allowed?.[picForm.personId]?.[picForm.product]) return alert("Produk tidak diizinkan untuk pegawai ini.");
+    const amount = Number(picForm.amount);
+    if (Number.isNaN(amount) || amount < 0) return alert("Amount tidak valid.");
+    const payload = { personId: picForm.personId, product: picForm.product, amount, date: picForm.date };
+    const row = await apiPostAchievement(payload);
+    setAch(s => [{ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: row.date.slice(0, 10) }, ...s]);
+    setPicForm(f => ({ ...f, amount: "" }));
+  };
+
   const removeAchievement = async (id: string) => {
     await apiDeleteAchievement(id);
     setAch(s => s.filter(x => x.id !== id));
   };
 
+  // Menjaga pilihan produk tetap valid saat person berubah (BM & PIC)
   useEffect(() => {
     setForm(f => {
       if (!f.personId) return f;
@@ -898,8 +1030,17 @@ export default function App() {
       return f;
     });
   }, [form.personId, productConfigs, allowed]); // eslint-disable-line
+  useEffect(() => {
+    setPicForm(f => {
+      if (!f.personId) return f;
+      const names = productConfigs.filter(cfg => !!allowed?.[f.personId]?.[cfg.name]).map(c => c.name);
+      if (names.length === 0) return { ...f, product: "" };
+      if (!names.includes(f.product)) return { ...f, product: names[0] };
+      return f;
+    });
+  }, [picForm.personId, productConfigs, allowed]); // eslint-disable-line
 
-  // Statistik unit (dibiarkan jika diperlukan di masa depan)
+  // Statistik unit (dipertahankan bila butuh)
   const totalsByPerson = useMemo(() => sumByPerson(ach), [ach]);
   const unitTotal = (unit: Person["unit"]) =>
     orgState.filter(p => p.unit === unit && !["MBM", "BOS", "BM"].includes(p.role))
@@ -934,7 +1075,7 @@ export default function App() {
 
           {/* NAV */}
           <nav className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {(["Overview","Individuals","Input"] as const).map(t => (
+            {(["Overview","Individuals","PIC","Input"] as const).map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -1001,6 +1142,18 @@ export default function App() {
           />
         )}
 
+        {tab === "PIC" && (
+          <PicInput
+            form={picForm}
+            setForm={setPicForm}
+            addAchievement={addAchievementPIC}
+            ach={ach}
+            allowed={allowed}
+            productConfigs={productConfigs}
+            org={orgRef.current}
+          />
+        )}
+
         {tab === "Input" && (
           <InputPanel
             pinOk={pinOk}
@@ -1009,7 +1162,7 @@ export default function App() {
             setForm={setForm}
             addAchievement={addAchievement}
             ach={ach}
-            removeAchievement={async (id) => { await apiDeleteAchievement(id); setAch(s => s.filter(x => x.id !== id)); }}
+            removeAchievement={removeAchievement}
             targets={targets}
             setTargets={setTargets}
             productConfigs={productConfigs}
