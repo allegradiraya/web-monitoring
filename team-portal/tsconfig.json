@@ -5,10 +5,6 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
 
     "strict": true,
     "noEmit": true,
@@ -22,11 +18,9 @@
     "useDefineForClassFields": true,
 
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["src/*"] },
 
-    "types": ["vite/client", "react", "react-dom"]
     "types": ["vite/client", "node"]
   },
   "include": ["src", "api/**/*.ts"]
 }
-
