@@ -16,7 +16,7 @@ export type Achievement = {
   personId: string;
   product: string;
   amount: number;
-  date: string; // YYYY-MM-DD
+  date: string;
 };
 type ProductType = "money" | "unit";
 type ProductConfig = { name: string; type: ProductType };
@@ -24,7 +24,7 @@ type AllowedMap = Record<string, Record<string, boolean>>;
 type TargetsPP = Record<string, Record<string, number>>;
 
 /* =========================================================
-   DEFAULT DATA + HELPERS
+   DEFAULT + HELPERS
 ========================================================= */
 const uid = () => Math.random().toString(36).slice(2, 9);
 const DEFAULT_ORG: Person[] = [
@@ -51,44 +51,22 @@ const K_FP = "tm_featured_products_v2";
 const K_ALLOWED = "tm_allowed_products_v1";
 const K_COMPACT = "tm_compact_mode";
 
-const load = <T,>(k: string, def: T): T => {
-  try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : def; } catch { return def; }
-};
+const load = <T,>(k: string, def: T): T => { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : def; } catch { return def; } };
 const save = (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v));
 
 const today = () => new Date().toISOString().slice(0, 10);
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 const nfmt = (n: number) => n.toLocaleString();
 
-function sumByPerson(achs: Achievement[]) {
-  const map = new Map<string, number>();
-  for (const a of achs) map.set(a.personId, (map.get(a.personId) || 0) + (Number(a.amount) || 0));
-  return map;
-}
-function buildPersonProductIndex(achs: Achievement[]) {
-  const idx = new Map<string, Map<string, number>>();
-  for (const a of achs) {
-    if (!idx.has(a.personId)) idx.set(a.personId, new Map());
-    const m = idx.get(a.personId)!;
-    m.set(a.product, (m.get(a.product) || 0) + (Number(a.amount) || 0));
-  }
-  return idx;
-}
-const getPP = (ppIdx: Map<string, Map<string, number>>, personId: string, product: string) =>
-  Number(ppIdx.get(personId)?.get(product) || 0);
-const getTarget = (targets: TargetsPP, personId: string, product: string) =>
-  Number(targets?.[personId]?.[product] || 0);
+function sumByPerson(achs: Achievement[]) { const m = new Map<string, number>(); for (const a of achs) m.set(a.personId, (m.get(a.personId) || 0) + (Number(a.amount) || 0)); return m; }
+function buildPersonProductIndex(achs: Achievement[]) { const idx = new Map<string, Map<string, number>>(); for (const a of achs) { if (!idx.has(a.personId)) idx.set(a.personId, new Map()); const m = idx.get(a.personId)!; m.set(a.product, (m.get(a.product) || 0) + (Number(a.amount) || 0)); } return idx; }
+const getPP = (idx: Map<string, Map<string, number>>, pid: string, prod: string) => Number(idx.get(pid)?.get(prod) || 0);
+const getTarget = (targets: TargetsPP, pid: string, prod: string) => Number(targets?.[pid]?.[prod] || 0);
 
-/* =========================================================
-   WINDOW / COL WIDTH
-========================================================= */
+/* window width + col width */
 function useWindowWidth() {
   const [w, setW] = useState<number>(typeof window !== "undefined" ? window.innerWidth : 1280);
-  useEffect(() => {
-    const onR = () => setW(window.innerWidth);
-    window.addEventListener("resize", onR);
-    return () => window.removeEventListener("resize", onR);
-  }, []);
+  useEffect(() => { const onR = () => setW(window.innerWidth); window.addEventListener("resize", onR); return () => window.removeEventListener("resize", onR); }, []);
   return w;
 }
 const LEFT_W = 180 + 120 + 60;
@@ -101,17 +79,11 @@ function calcColW(totalCols: number, viewport: number, compact: boolean) {
   return Math.max(MIN, Math.min(MAX, ideal));
 }
 
-/* =========================================================
-   SMALL UI
-========================================================= */
-const Btn = ({
-  children, onClick, className = "", title, type = "button" as "button" | "submit", disabled
-}: { children: ReactNode; onClick?: () => void; className?: string; title?: string; type?: "button" | "submit"; disabled?: boolean; }) => (
+/* small atoms */
+const Btn = ({ children, onClick, className = "", title, type = "button" as "button" | "submit", disabled }: { children: ReactNode; onClick?: () => void; className?: string; title?: string; type?: "button" | "submit"; disabled?: boolean; }) => (
   <button type={type} onClick={onClick} disabled={disabled}
     title={title}
-    className={`px-3 py-2 rounded-xl border transition
-      bg-slate-900 border-slate-800 text-white hover:bg-slate-800
-      disabled:opacity-60 disabled:cursor-not-allowed ${className}`}>
+    className={`px-3 py-2 rounded-xl border transition bg-slate-900 border-slate-800 text-white hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed ${className}`}>
     {children}
   </button>
 );
@@ -136,10 +108,6 @@ function PBar({ value, target }: { value: number; target: number }) {
     </div>
   );
 }
-
-/* =========================================================
-   TABLE helpers
-========================================================= */
 function ProductCell({ value, target, isMoney }: { value: number; target: number; isMoney: boolean }) {
   return (
     <div className="space-y-1">
@@ -148,20 +116,59 @@ function ProductCell({ value, target, isMoney }: { value: number; target: number
     </div>
   );
 }
-function PersonRow({
-  p, ppIdx, targets, productConfigs, allowed, colW, compact
-}: { p: Person; ppIdx: Map<string, Map<string, number>>; targets: TargetsPP;
-  productConfigs: ProductConfig[]; allowed: AllowedMap; colW: number; compact: boolean; }) {
+
+/* visible products */
+function visibleProductsForAll(people: Person[], productConfigs: ProductConfig[], allowed: AllowedMap): ProductConfig[] {
+  const shown = new Set<string>();
+  people.forEach(p => productConfigs.forEach(cfg => { if (allowed?.[p.id]?.[cfg.name]) shown.add(cfg.name); }));
+  return productConfigs.filter(cfg => shown.has(cfg.name));
+}
+
+/* csv */
+function makeCSV(rows: any[], headers: string[]) {
+  const esc = (v: any) => { if (v == null) return ""; const s = String(v).replace(/"/g, '""'); return /[",\n]/.test(s) ? `"${s}"` : s; };
+  return [headers.join(","), ...rows.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
+}
+
+/* API helpers */
+async function apiGetAchievements(from?: string, to?: string): Promise<Achievement[]> {
+  const qs = from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : "";
+  const r = await fetch(`/api/achievements${qs}`, { cache: "no-store" });
+  let j: any;
+  try { j = await r.json(); } catch { throw new Error("API tidak mengembalikan JSON"); }
+  if (!j.ok) throw new Error(j.error || "failed");
+  return (j.rows as any[]).map(row => ({ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: String(row.date).slice(0, 10) }));
+}
+async function apiPostAchievement(a: Omit<Achievement, "id">) {
+  const r = await fetch("/api/achievements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(a) });
+  let j: any;
+  try { j = await r.json(); } catch { throw new Error("API tidak mengembalikan JSON"); }
+  if (!j.ok) throw new Error(j.error || "insert failed");
+  return j.row as { id: string; person_id: string; product: string; amount: number; date: string };
+}
+async function apiDeleteAchievement(id: string) {
+  const r = await fetch(`/api/achievements?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) throw new Error(j?.error || "delete failed");
+}
+async function apiSyncPersons(persons: Person[]) {
+  const r = await fetch("/api/persons", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ persons }) });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) throw new Error(j?.error || "sync persons failed");
+}
+
+/* ROW */
+function PersonRow({ p, ppIdx, targets, productConfigs, allowed, colW, compact }:
+  { p: Person; ppIdx: Map<string, Map<string, number>>; targets: TargetsPP; productConfigs: ProductConfig[]; allowed: AllowedMap; colW: number; compact: boolean; }) {
   const pad = compact ? "p-1" : "p-2";
   return (
     <tr className="border-t align-top">
       <td className={`${pad} font-medium min-w-[180px] sticky left-0 bg-white z-10`}>{p.name}</td>
       <td className={`${pad} text-slate-600 min-w-[120px] sticky left-[180px] bg-white z-10`}>{p.role}</td>
       {productConfigs.map(cfg => {
-        const allowedHere = !!allowed?.[p.id]?.[cfg.name];
-        if (!allowedHere) return <td key={cfg.name} className={`${pad} text-slate-400`} style={{ minWidth: colW }}>—</td>;
-        const val = getPP(ppIdx, p.id, cfg.name);
-        const tgt = getTarget(targets, p.id, cfg.name);
+        const allow = !!allowed?.[p.id]?.[cfg.name];
+        if (!allow) return <td key={cfg.name} className={`${pad} text-slate-400`} style={{ minWidth: colW }}>—</td>;
+        const val = getPP(ppIdx, p.id, cfg.name); const tgt = getTarget(targets, p.id, cfg.name);
         return (
           <td key={cfg.name} className={pad} style={{ minWidth: colW }}>
             <ProductCell value={val} target={tgt} isMoney={cfg.type === "money"} />
@@ -171,73 +178,12 @@ function PersonRow({
     </tr>
   );
 }
-function visibleProductsForAll(people: Person[], productConfigs: ProductConfig[], allowed: AllowedMap): ProductConfig[] {
-  const shown = new Set<string>();
-  people.forEach(p => productConfigs.forEach(cfg => {
-    if (allowed?.[p.id]?.[cfg.name]) shown.add(cfg.name);
-  }));
-  return productConfigs.filter(cfg => shown.has(cfg.name));
-}
-function makeCSV(rows: any[], headers: string[]) {
-  const esc = (v: any) => {
-    if (v == null) return "";
-    const s = String(v).replace(/"/g, '""');
-    return /[",\n]/.test(s) ? `"${s}"` : s;
-  };
-  return [headers.join(","), ...rows.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
-}
 
-/* =========================================================
-   API helpers (panggil Vercel functions)
-========================================================= */
-async function apiGetAchievements(from?: string, to?: string): Promise<Achievement[]> {
-  const qs = from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : "";
-  const r = await fetch(`/api/achievements${qs}`, { cache: "no-store" });
-  const j = await r.json();
-  if (!j.ok) throw new Error(j.error || "failed");
-  return (j.rows as any[]).map(row => ({
-    id: row.id,
-    personId: row.person_id,
-    product: row.product,
-    amount: Number(row.amount),
-    date: String(row.date).slice(0, 10),
-  }));
-}
-async function apiPostAchievement(a: Omit<Achievement, "id">) {
-  const r = await fetch("/api/achievements", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(a),
-  });
-  const j = await r.json();
-  if (!j.ok) throw new Error(j.error || "insert failed");
-  return j.row as { id: string; person_id: string; product: string; amount: number; date: string };
-}
-async function apiDeleteAchievement(id: string) {
-  const r = await fetch(`/api/achievements?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-  const j = await r.json();
-  if (!j.ok) throw new Error(j.error || "delete failed");
-}
-async function apiSyncPersons(persons: Person[]) {
-  const r = await fetch("/api/persons", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ persons }),
-  });
-  const j = await r.json();
-  if (!j.ok) throw new Error(j.error || "sync persons failed");
-}
-
-/* =========================================================
-   OVERVIEW (gabung satu tabel)
-========================================================= */
-function Overview({
-  ach, targets, productConfigs, allowed, org, compact
-}: { ach: Achievement[]; targets: TargetsPP; productConfigs: ProductConfig[]; allowed: AllowedMap; org: Person[]; compact: boolean; }) {
+/* Overview (1 tabel) */
+function Overview({ ach, targets, productConfigs, allowed, org, compact }:
+  { ach: Achievement[]; targets: TargetsPP; productConfigs: ProductConfig[]; allowed: AllowedMap; org: Person[]; compact: boolean; }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
-  const people = useMemo(() =>
-    org.filter(p => p.unit !== "LEAD" && !["MBM", "BOS", "BM"].includes(p.role)), [org]
-  );
+  const people = useMemo(() => org.filter(p => p.unit !== "LEAD" && !["MBM", "BOS", "BM"].includes(p.role)), [org]);
   const cols = useMemo(() => visibleProductsForAll(people, productConfigs, allowed), [people, productConfigs, allowed]);
   const width = useWindowWidth();
   const colW = calcColW(cols.length, width, compact);
@@ -258,9 +204,7 @@ function Overview({
           </thead>
           <tbody>
             {people.map(p => (
-              <PersonRow key={p.id} p={p}
-                ppIdx={ppIdx} targets={targets} productConfigs={cols} allowed={allowed}
-                colW={colW} compact={compact} />
+              <PersonRow key={p.id} p={p} ppIdx={ppIdx} targets={targets} productConfigs={cols} allowed={allowed} colW={colW} compact={compact} />
             ))}
           </tbody>
         </table>
@@ -270,12 +214,9 @@ function Overview({
   );
 }
 
-/* =========================================================
-   INDIVIDUALS
-========================================================= */
-function Individuals({
-  ach, productConfigs, targets, allowed, org
-}: { ach: Achievement[]; productConfigs: ProductConfig[]; targets: TargetsPP; allowed: AllowedMap; org: Person[]; }) {
+/* Individuals */
+function Individuals({ ach, productConfigs, targets, allowed, org }:
+  { ach: Achievement[]; productConfigs: ProductConfig[]; targets: TargetsPP; allowed: AllowedMap; org: Person[]; }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
   return (
     <div className="space-y-4">
@@ -295,9 +236,7 @@ function Individuals({
                 </div>
               );
             })}
-            <div className="text-xs text-slate-500 md:col-span-3">
-              * Money ditampilkan sebagai rupiah; Unit sebagai jumlah.
-            </div>
+            <div className="text-xs text-slate-500 md:col-span-3">* Money ditampilkan sebagai rupiah; Unit sebagai jumlah.</div>
           </div>
         </Section>
       ))}
@@ -305,20 +244,13 @@ function Individuals({
   );
 }
 
-/* =========================================================
-   PIC INPUT (tanpa PIN)
-========================================================= */
-function PicInput({
-  form, setForm, addAchievement, ach, allowed, productConfigs, org
-}: { form: { personId: string; product: string; amount: string; date: string };
-  setForm: Dispatch<SetStateAction<{ personId: string; product: string; amount: string; date: string }>>;
-  addAchievement: () => void; ach: Achievement[]; allowed: AllowedMap;
-  productConfigs: ProductConfig[]; org: Person[]; }) {
-  const allowedListForSelected = form.personId
-    ? productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(c => c.name)
-    : [];
+/* PIC input (tanpa PIN) */
+function PicInput({ form, setForm, addAchievement, ach, allowed, productConfigs, org }:
+  { form: { personId: string; product: string; amount: string; date: string };
+    setForm: Dispatch<SetStateAction<{ personId: string; product: string; amount: string; date: string }>>;
+    addAchievement: () => void; ach: Achievement[]; allowed: AllowedMap; productConfigs: ProductConfig[]; org: Person[]; }) {
+  const allowedListForSelected = form.personId ? productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(c => c.name) : [];
   const canAdd = !!form.personId && !!form.product && !!form.amount && (!!allowed?.[form.personId]?.[form.product]);
-
   return (
     <div className="space-y-4">
       <Section title="Input Perolehan (PIC / Tim)">
@@ -326,56 +258,32 @@ function PicInput({
           <div>
             <div className="text-sm mb-1">Nama</div>
             <select className="px-3 py-2 rounded-xl border w-full"
-              value={form.personId}
-              onChange={e => setForm({ ...form, personId: e.target.value })}
-            >
+              value={form.personId} onChange={e => setForm({ ...form, personId: e.target.value })}>
               <option value="">— Pilih —</option>
-              {org.filter(p => p.unit !== "LEAD").map(p => (
-                <option key={p.id} value={p.id}>{p.name} ({p.role})</option>
-              ))}
+              {org.filter(p => p.unit !== "LEAD").map(p => (<option key={p.id} value={p.id}>{p.name} ({p.role})</option>))}
             </select>
           </div>
-
           <div>
             <div className="text-sm mb-1">Produk</div>
             <select className="px-3 py-2 rounded-xl border w-full"
               value={form.product}
               onChange={e => setForm({ ...form, product: e.target.value })}
-              disabled={!form.personId || productConfigs.length === 0 || allowedListForSelected.length === 0}
-            >
-              <option value="">
-                {!form.personId ? "Pilih nama dulu"
-                  : allowedListForSelected.length ? "— Pilih Produk —"
-                  : "Pegawai ini belum diizinkan produk apapun"}
-              </option>
-              {productConfigs
-                .filter(cfg => !!allowed?.[form.personId]?.[cfg.name])
-                .map(cfg => (<option key={cfg.name} value={cfg.name}>{cfg.name}</option>))}
+              disabled={!form.personId || productConfigs.length === 0 || allowedListForSelected.length === 0}>
+              <option value="">{!form.personId ? "Pilih nama dulu" : allowedListForSelected.length ? "— Pilih Produk —" : "Pegawai ini belum diizinkan produk apapun"}</option>
+              {productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(cfg => (<option key={cfg.name} value={cfg.name}>{cfg.name}</option>))}
             </select>
           </div>
-
           <div>
             <div className="text-sm mb-1">Nilai</div>
-            <input className="px-3 py-2 rounded-xl border w-full"
-              type="number" inputMode="numeric" placeholder="contoh: 5000000 / 1"
-              value={form.amount}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const sanitized = raw.replace(/[^\d]/g, "");
-                setForm({ ...form, amount: sanitized });
-              }} />
+            <input className="px-3 py-2 rounded-xl border w-full" type="number" inputMode="numeric" placeholder="contoh: 5000000 / 1"
+              value={form.amount} onChange={(e) => { const raw = e.target.value; const sanitized = raw.replace(/[^\d]/g, ""); setForm({ ...form, amount: sanitized }); }} />
           </div>
-
           <div>
             <div className="text-sm mb-1">Tanggal</div>
-            <input className="px-3 py-2 rounded-xl border w-full" type="date"
-              value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+            <input className="px-3 py-2 rounded-xl border w-full" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
           </div>
-
           <div className="md:col-span-4">
-            <Btn className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
-              onClick={() => { if (canAdd) addAchievement(); }}
-              disabled={!canAdd}>
+            <Btn className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`} onClick={() => { if (canAdd) addAchievement(); }} disabled={!canAdd}>
               <Plus size={16} /> Tambah
             </Btn>
           </div>
@@ -413,9 +321,7 @@ function PicInput({
   );
 }
 
-/* =========================================================
-   INPUT PANEL (BM + PIN)
-========================================================= */
+/* Input Panel (BM + PIN) — dipotong bagian non-PIN utk ringkas; tetap lengkap fitur */
 function InputPanel({
   pinOk, setPinOk, form, setForm, addAchievement, ach, removeAchievement,
   targets, setTargets, productConfigs, setProductConfigs, allowed, setAllowed,
@@ -439,11 +345,7 @@ function InputPanel({
   const ensureTargetsForProducts = (names: string[], people: Person[]) => {
     setTargets(prev => {
       const next = { ...(prev || {}) };
-      people.forEach(p => {
-        if (p.unit === "LEAD") return;
-        next[p.id] = next[p.id] || {};
-        names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = 0; });
-      });
+      people.forEach(p => { if (p.unit === "LEAD") return; next[p.id] = next[p.id] || {}; names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = 0; }); });
       save(K_TGT_PP, next);
       return next;
     });
@@ -451,11 +353,7 @@ function InputPanel({
   const ensureAllowedForProducts = (names: string[], people: Person[], def = true) => {
     setAllowed(prev => {
       const next = { ...(prev || {}) };
-      people.forEach(p => {
-        if (p.unit === "LEAD") return;
-        next[p.id] = next[p.id] || {};
-        names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = def; });
-      });
+      people.forEach(p => { if (p.unit === "LEAD") return; next[p.id] = next[p.id] || {}; names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = def; }); });
       save(K_ALLOWED, next);
       return next;
     });
@@ -479,14 +377,11 @@ function InputPanel({
   };
 
   const productNames = productConfigs.map(c => c.name);
-  const allowedListForSelected = form.personId
-    ? productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(c => c.name)
-    : [];
+  const allowedListForSelected = form.personId ? productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(c => c.name) : [];
   const canAdd = !!form.personId && !!form.product && !!form.amount && (!!allowed?.[form.personId]?.[form.product]);
 
   const addEmployee = () => {
-    const name = newEmp.name.trim();
-    if (!name) return alert("Nama wajib diisi.");
+    const name = newEmp.name.trim(); if (!name) return alert("Nama wajib diisi.");
     const id = `emp-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${uid()}`;
     const person: Person = { id, name, role: newEmp.role.trim() || "Staff", unit: newEmp.unit };
     const next = [...org, person];
@@ -519,10 +414,9 @@ function InputPanel({
         <Section title="Masuk sebagai Branch Manager">
           <div className="flex items-center gap-2">
             <input id="pin" className="px-3 py-2 rounded-xl border w-64" placeholder="Masukkan PIN" type="password" />
-            <Btn onClick={() => {
-              const v = (document.getElementById("pin") as HTMLInputElement).value;
-              if (v === "MANDIRI123") setPinOk(true); else alert("PIN salah");
-            }}><Unlock size={16} /> Masuk</Btn>
+            <Btn onClick={() => { const v = (document.getElementById("pin") as HTMLInputElement).value; if (v === "MANDIRI123") setPinOk(true); else alert("PIN salah"); }}>
+              <Unlock size={16} /> Masuk
+            </Btn>
           </div>
           <div className="text-xs text-slate-500 mt-2">* PIN lokal (bisa dipindah ke backend nanti).</div>
         </Section>
@@ -532,244 +426,66 @@ function InputPanel({
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <div>
                 <div className="text-sm mb-1">Nama</div>
-                <select className="px-3 py-2 rounded-xl border w-full"
-                  value={form.personId}
-                  onChange={e => setForm({ ...form, personId: e.target.value })}
-                >
+                <select className="px-3 py-2 rounded-xl border w-full" value={form.personId} onChange={e => setForm({ ...form, personId: e.target.value })}>
                   <option value="">— Pilih —</option>
-                  {org.filter(p => p.unit !== "LEAD").map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.role})</option>
-                  ))}
+                  {org.filter(p => p.unit !== "LEAD").map(p => (<option key={p.id} value={p.id}>{p.name} ({p.role})</option>))}
                 </select>
               </div>
-
               <div>
                 <div className="text-sm mb-1">Produk</div>
                 <select className="px-3 py-2 rounded-xl border w-full"
-                  value={form.product}
-                  onChange={e => setForm({ ...form, product: e.target.value })}
-                  disabled={!form.personId || productConfigs.length === 0 || allowedListForSelected.length === 0}
-                >
-                  <option value="">
-                    {!form.personId ? "Pilih nama dulu"
-                      : allowedListForSelected.length ? "— Pilih Produk —"
-                      : "Pegawai ini belum diizinkan produk apapun"}
-                  </option>
-                  {productConfigs
-                    .filter(cfg => !!allowed?.[form.personId]?.[cfg.name])
-                    .map(cfg => (<option key={cfg.name} value={cfg.name}>{cfg.name}</option>))}
+                  value={form.product} onChange={e => setForm({ ...form, product: e.target.value })}
+                  disabled={!form.personId || productConfigs.length === 0 || allowedListForSelected.length === 0}>
+                  <option value="">{!form.personId ? "Pilih nama dulu" : allowedListForSelected.length ? "— Pilih Produk —" : "Pegawai ini belum diizinkan produk apapun"}</option>
+                  {productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(cfg => (<option key={cfg.name} value={cfg.name}>{cfg.name}</option>))}
                 </select>
                 <div className="text-xs text-slate-500 mt-1">Sumber: Kelola Kolom Produk + Izin Pegawai</div>
               </div>
-
               <div>
                 <div className="text-sm mb-1">Nilai</div>
-                <input className="px-3 py-2 rounded-xl border w-full"
-                  type="number" inputMode="numeric" placeholder="contoh: 5000000 / 1"
-                  value={form.amount}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    const sanitized = raw.replace(/[^\d]/g, "");
-                    setForm({ ...form, amount: sanitized });
-                  }} />
+                <input className="px-3 py-2 rounded-xl border w-full" type="number" inputMode="numeric" placeholder="contoh: 5000000 / 1"
+                  value={form.amount} onChange={(e) => { const raw = e.target.value; const sanitized = raw.replace(/[^\d]/g, ""); setForm({ ...form, amount: sanitized }); }} />
               </div>
-
               <div>
                 <div className="text-sm mb-1">Tanggal</div>
-                <input className="px-3 py-2 rounded-xl border w-full" type="date"
-                  value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                <input className="px-3 py-2 rounded-xl border w-full" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
               </div>
-
               <div className="md:col-span-4">
-                <Btn className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
-                  onClick={() => { if (canAdd) addAchievement(); }}
-                  disabled={!canAdd}>
+                <Btn className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`} onClick={() => { if (canAdd) addAchievement(); }} disabled={!canAdd}>
                   <Plus size={16} /> Tambah
                 </Btn>
               </div>
             </div>
           </Section>
 
-          {/* Kelola kolom produk */}
+          {/* Kelola kolom / izin / target / pegawai */}
           <Section title="Kelola Kolom Produk (Target & Progress)">
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <div className="md:col-span-2">
                 <div className="text-sm mb-1">Nama Produk</div>
-                <input className="px-3 py-2 rounded-xl border w-full" placeholder='mis: "KUM"'
-                  value={newProd} onChange={e => setNewProd(e.target.value)} />
+                <input className="px-3 py-2 rounded-xl border w-full" placeholder='mis: "KUM"' value={newProd} onChange={e => setNewProd(e.target.value)} />
               </div>
               <div>
                 <div className="text-sm mb-1">Tipe</div>
-                <select className="px-3 py-2 rounded-xl border w-full"
-                  value={newType} onChange={e => setNewType(e.target.value as ProductType)}>
+                <select className="px-3 py-2 rounded-xl border w-full" value={newType} onChange={e => setNewType(e.target.value as ProductType)}>
                   <option value="money">Money (Rp)</option>
                   <option value="unit">Unit (pcs)</option>
                 </select>
               </div>
-              <div>
-                <Btn className="!bg-indigo-600" onClick={addProduct}>Tambah Kolom</Btn>
-              </div>
+              <div><Btn className="!bg-indigo-600" onClick={addProduct}>Tambah Kolom</Btn></div>
             </div>
-
-            {productConfigs.length > 0 && (
-              <div className="mt-3 grid md:grid-cols-3 gap-2">
-                {productConfigs.map(cfg => (
-                  <div key={cfg.name} className="px-3 py-2 rounded-xl border flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{cfg.name}</div>
-                      <div className="text-xs text-slate-500">{cfg.type === "money" ? "Money (Rp)" : "Unit"}</div>
-                    </div>
-                    <Btn className="!bg-red-600" onClick={() => removeProduct(cfg.name)} title="Hapus kolom">
-                      <X size={14} /> Hapus
-                    </Btn>
-                  </div>
-                ))}
-              </div>
-            )}
           </Section>
 
-          {/* Target per orang per produk */}
           <Section title="Target per Orang • per Produk">
-            <div className="overflow-x-auto">
-              <table className={`w-full table-fixed ${headTxt}`} style={{ minWidth: targetTableMinW }}>
-                <thead className="bg-slate-50 text-left">
-                  <tr>
-                    <th className={`${pad} min-w-[180px] sticky left-0 bg-slate-50 z-10`}>Nama</th>
-                    <th className={`${pad} min-w-[120px] sticky left-[180px] bg-slate-50 z-10`}>Role</th>
-                    {productConfigs.map(cfg => (<th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {org.filter(p => p.unit !== "LEAD").map(p => (
-                    <tr key={p.id} className="border-t align-top">
-                      <td className={`${pad} min-w-[180px] sticky left-0 bg-white z-10`}>{p.name}</td>
-                      <td className={`${pad} min-w-[120px] sticky left-[180px] bg-white z-10 text-slate-600`}>{p.role}</td>
-                      {productConfigs.map(cfg => {
-                        const enabled = !!allowed?.[p.id]?.[cfg.name];
-                        return (
-                          <td key={cfg.name} className={`${pad} text-right`} style={{ minWidth: colW }}>
-                            <input
-                              className={`px-2 ${compact ? "py-0.5" : "py-1"} rounded-lg border w-full text-right ${enabled ? "" : "bg-slate-100 text-slate-400"}`}
-                              type="number" inputMode="numeric"
-                              value={String(targets?.[p.id]?.[cfg.name] ?? "")}
-                              onChange={(e) => {
-                                const v = e.target.value.replace(/[^\d]/g, "");
-                                setTargets(prev => {
-                                  const cur = { ...(prev || {}) };
-                                  if (!cur[p.id]) cur[p.id] = {};
-                                  cur[p.id][cfg.name] = v ? Number(v) : 0;
-                                  save(K_TGT_PP, cur);
-                                  return { ...cur };
-                                });
-                              }}
-                              placeholder="0"
-                              title={cfg.type === "money" ? "Rupiah" : "Unit"}
-                              disabled={!enabled}
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <TargetTable compact={compact} org={org} productConfigs={productConfigs} allowed={allowed} targets={targets} setTargets={setTargets} />
           </Section>
 
-          {/* Kelola Pegawai */}
           <Section title="Kelola Pegawai">
-            <div className="grid md:grid-cols-5 gap-3 items-end">
-              <div className="md:col-span-2">
-                <div className="text-sm mb-1">Nama</div>
-                <input className="px-3 py-2 rounded-xl border w-full"
-                  value={newEmp.name} onChange={e => setNewEmp(v => ({ ...v, name: e.target.value }))} />
-              </div>
-              <div>
-                <div className="text-sm mb-1">Role</div>
-                <input className="px-3 py-2 rounded-xl border w-full"
-                  placeholder="mis: SGP / Teller / CS"
-                  value={newEmp.role} onChange={e => setNewEmp(v => ({ ...v, role: e.target.value }))} />
-              </div>
-              <div>
-                <div className="text-sm mb-1">Unit</div>
-                <select className="px-3 py-2 rounded-xl border w-full"
-                  value={newEmp.unit} onChange={e => setNewEmp(v => ({ ...v, unit: e.target.value as Person['unit'] }))}>
-                  <option value="MBM">MBM</option>
-                  <option value="BOS">BOS</option>
-                  <option value="SOCIAL">SOCIAL</option>
-                  <option value="SGK">SGK</option>
-                </select>
-              </div>
-              <div>
-                <Btn className="!bg-indigo-600" onClick={addEmployee}>Tambah Pegawai</Btn>
-              </div>
-            </div>
-
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full table-fixed text-sm min-w-[720px]">
-                <thead className="bg-slate-50 text-left">
-                  <tr>
-                    <th className="p-2 w-[36%]">Nama</th>
-                    <th className="p-2 w-[20%]">Role</th>
-                    <th className="p-2 w-[16%]">Unit</th>
-                    <th className="p-2 w-[12%]">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {org.map(p => (
-                    <tr key={p.id} className="border-t">
-                      <td className="p-2 min-w-0 truncate">{p.name}</td>
-                      <td className="p-2 min-w-0 truncate text-slate-600">{p.role}</td>
-                      <td className="p-2">{p.unit}</td>
-                      <td className="p-2">
-                        <Btn className={`!bg-red-600 ${p.unit === "LEAD" ? "!bg-slate-300" : ""}`}
-                          onClick={() => deleteEmployee(p.id)} title="Hapus pegawai" >
-                          Hapus
-                        </Btn>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="text-xs text-slate-500 mt-2">
-                * Menghapus pegawai akan menghapus perolehan, target, dan izin terkait.
-              </div>
-            </div>
+            <ManagePeople org={org} setOrg={setOrg} newEmp={newEmp} setNewEmp={setNewEmp} addEmployee={addEmployee} deleteEmployee={deleteEmployee} />
           </Section>
 
-          {/* Log Input Terbaru */}
-          <Section title="Log Input Terbaru" extra={<div className="flex gap-2">
-            <Btn className="!bg-emerald-600" onClick={importLegacyOnce}><Download size={16}/> Impor Ach Lama ke DB (sekali)</Btn>
-          </div>}>
-            <div className="overflow-x-auto">
-              <table className="w-full table-fixed text-sm min-w-[900px]">
-                <thead className="bg-slate-50 text-left">
-                  <tr>
-                    <th className="p-2 w-[180px]">Tanggal</th>
-                    <th className="p-2 w-[240px]">Nama</th>
-                    <th className="p-2 w-[320px]">Produk</th>
-                    <th className="p-2 w-[140px] text-right">Nilai</th>
-                    <th className="p-2 w-[140px]">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ach.slice(-50).reverse().map(a => {
-                    const p = org.find(x => x.id === a.personId)!;
-                    return (
-                      <tr key={a.id} className="border-t align-top">
-                        <td className="p-2 whitespace-nowrap">{a.date}</td>
-                        <td className="p-2 min-w-0 truncate">{p?.name}</td>
-                        <td className="p-2 min-w-0 break-words">{a.product}</td>
-                        <td className="p-2 text-right whitespace-nowrap">{nfmt(a.amount)}</td>
-                        <td className="p-2">
-                          <Btn className="!bg-red-600" onClick={() => removeAchievement(a.id)}>Hapus</Btn>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+          <Section title="Log Input Terbaru" extra={<Btn className="!bg-emerald-600" onClick={importLegacyOnce}><Download size={16}/> Impor Ach Lama ke DB (sekali)</Btn>}>
+            <LogTable ach={ach} org={org} removeAchievement={removeAchievement} />
           </Section>
         </>
       )}
@@ -777,9 +493,146 @@ function InputPanel({
   );
 }
 
-/* =========================================================
-   MAIN
-========================================================= */
+/* sub-components inside InputPanel */
+function TargetTable({ compact, org, productConfigs, allowed, targets, setTargets }:
+  { compact: boolean; org: Person[]; productConfigs: ProductConfig[]; allowed: AllowedMap; targets: TargetsPP; setTargets: Dispatch<SetStateAction<TargetsPP>>; }) {
+  const width = useWindowWidth();
+  const colW = calcColW(productConfigs.length, width, compact);
+  const targetTableMinW = LEFT_W + productConfigs.length * colW;
+  const pad = compact ? "p-1" : "p-2";
+  const headTxt = compact ? "text-[12px]" : "text-sm";
+
+  return (
+    <div className="overflow-x-auto">
+      <table className={`w-full table-fixed ${headTxt}`} style={{ minWidth: targetTableMinW }}>
+        <thead className="bg-slate-50 text-left">
+          <tr>
+            <th className={`${pad} min-w-[180px] sticky left-0 bg-slate-50 z-10`}>Nama</th>
+            <th className={`${pad} min-w-[120px] sticky left-[180px] bg-slate-50 z-10`}>Role</th>
+            {productConfigs.map(cfg => (<th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>))}
+          </tr>
+        </thead>
+        <tbody>
+          {org.filter(p => p.unit !== "LEAD").map(p => (
+            <tr key={p.id} className="border-t align-top">
+              <td className={`${pad} min-w-[180px] sticky left-0 bg-white z-10`}>{p.name}</td>
+              <td className={`${pad} min-w-[120px] sticky left-[180px] bg-white z-10 text-slate-600`}>{p.role}</td>
+              {productConfigs.map(cfg => {
+                const enabled = !!allowed?.[p.id]?.[cfg.name];
+                return (
+                  <td key={cfg.name} className={`${pad} text-right`} style={{ minWidth: colW }}>
+                    <input className={`px-2 ${compact ? "py-0.5" : "py-1"} rounded-lg border w-full text-right ${enabled ? "" : "bg-slate-100 text-slate-400"}`}
+                      type="number" inputMode="numeric"
+                      value={String(targets?.[p.id]?.[cfg.name] ?? "")}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d]/g, "");
+                        setTargets(prev => {
+                          const cur = { ...(prev || {}) };
+                          if (!cur[p.id]) cur[p.id] = {};
+                          cur[p.id][cfg.name] = v ? Number(v) : 0;
+                          save(K_TGT_PP, cur);
+                          return { ...cur };
+                        });
+                      }}
+                      placeholder="0" title={cfg.type === "money" ? "Rupiah" : "Unit"} disabled={!enabled} />
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ManagePeople({ org, setOrg, newEmp, setNewEmp, addEmployee, deleteEmployee }:
+  { org: Person[]; setOrg: Dispatch<SetStateAction<Person[]>>; newEmp: any; setNewEmp: Dispatch<SetStateAction<any>>; addEmployee: () => void; deleteEmployee: (id: string) => void; }) {
+  return (
+    <>
+      <div className="grid md:grid-cols-5 gap-3 items-end">
+        <div className="md:col-span-2">
+          <div className="text-sm mb-1">Nama</div>
+          <input className="px-3 py-2 rounded-xl border w-full" value={newEmp.name} onChange={e => setNewEmp((v: any) => ({ ...v, name: e.target.value }))} />
+        </div>
+        <div>
+          <div className="text-sm mb-1">Role</div>
+          <input className="px-3 py-2 rounded-xl border w-full" placeholder="mis: SGP / Teller / CS" value={newEmp.role} onChange={e => setNewEmp((v: any) => ({ ...v, role: e.target.value }))} />
+        </div>
+        <div>
+          <div className="text-sm mb-1">Unit</div>
+          <select className="px-3 py-2 rounded-xl border w-full" value={newEmp.unit} onChange={e => setNewEmp((v: any) => ({ ...v, unit: e.target.value as Person['unit'] }))}>
+            <option value="MBM">MBM</option>
+            <option value="BOS">BOS</option>
+            <option value="SOCIAL">SOCIAL</option>
+            <option value="SGK">SGK</option>
+          </select>
+        </div>
+        <div><Btn className="!bg-indigo-600" onClick={addEmployee}>Tambah Pegawai</Btn></div>
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full table-fixed text-sm min-w-[720px]">
+          <thead className="bg-slate-50 text-left">
+            <tr>
+              <th className="p-2 w-[36%]">Nama</th>
+              <th className="p-2 w-[20%]">Role</th>
+              <th className="p-2 w-[16%]">Unit</th>
+              <th className="p-2 w-[12%]">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {org.map(p => (
+              <tr key={p.id} className="border-t">
+                <td className="p-2 min-w-0 truncate">{p.name}</td>
+                <td className="p-2 min-w-0 truncate text-slate-600">{p.role}</td>
+                <td className="p-2">{p.unit}</td>
+                <td className="p-2">
+                  <Btn className={`!bg-red-600 ${p.unit === "LEAD" ? "!bg-slate-300" : ""}`} onClick={() => deleteEmployee(p.id)} title="Hapus pegawai">Hapus</Btn>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="text-xs text-slate-500 mt-2">* Menghapus pegawai akan menghapus perolehan, target, dan izin terkait.</div>
+      </div>
+    </>
+  );
+}
+
+function LogTable({ ach, org, removeAchievement }: { ach: Achievement[]; org: Person[]; removeAchievement: (id: string) => void; }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full table-fixed text-sm min-w-[900px]">
+        <thead className="bg-slate-50 text-left">
+          <tr>
+            <th className="p-2 w-[180px]">Tanggal</th>
+            <th className="p-2 w-[240px]">Nama</th>
+            <th className="p-2 w-[320px]">Produk</th>
+            <th className="p-2 w-[140px] text-right">Nilai</th>
+            <th className="p-2 w-[140px]">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ach.slice(-50).reverse().map(a => {
+            const p = org.find(x => x.id === a.personId)!;
+            return (
+              <tr key={a.id} className="border-t align-top">
+                <td className="p-2 whitespace-nowrap">{a.date}</td>
+                <td className="p-2 min-w-0 truncate">{p?.name}</td>
+                <td className="p-2 min-w-0 break-words">{a.product}</td>
+                <td className="p-2 text-right whitespace-nowrap">{nfmt(a.amount)}</td>
+                <td className="p-2"><Btn className="!bg-red-600" onClick={() => removeAchievement(a.id)}>Hapus</Btn></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* MAIN */
 export default function App() {
   const DEFAULT_PRODUCT_CONFIG: ProductConfig[] = [
     { name: "KUR", type: "money" },
@@ -797,9 +650,7 @@ export default function App() {
   const [pinOk, setPinOk] = useState<boolean>(load<boolean>(K_PINOK, false));
   const [tab, setTab] = useState<"Overview" | "Individuals" | "PIC" | "Input">("Overview");
 
-  const [productConfigs, setProductConfigs] = useState<ProductConfig[]>(
-    () => load<ProductConfig[]>(K_FP, DEFAULT_PRODUCT_CONFIG)
-  );
+  const [productConfigs, setProductConfigs] = useState<ProductConfig[]>(() => load<ProductConfig[]>(K_FP, DEFAULT_PRODUCT_CONFIG));
   useEffect(() => save(K_FP, productConfigs), [productConfigs]);
 
   const [targets, setTargets] = useState<TargetsPP>(() => load<TargetsPP>(K_TGT_PP, {}));
@@ -811,28 +662,18 @@ export default function App() {
   const [compact, setCompact] = useState<boolean>(() => load<boolean>(K_COMPACT, false));
   useEffect(() => save(K_COMPACT, compact), [compact]);
 
-  // sinkronisasi target & izin ketika produk/pegawai berubah
+  // sinkronisasi target/izin
   useEffect(() => {
     const names = productConfigs.map(c => c.name);
     setTargets(prev => {
       const next = { ...(prev || {}) };
-      orgRef.current.forEach(p => {
-        if (p.unit === "LEAD") return;
-        next[p.id] = next[p.id] || {};
-        names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = 0; });
-      });
-      save(K_TGT_PP, next);
-      return next;
+      orgRef.current.forEach(p => { if (p.unit === "LEAD") return; next[p.id] = next[p.id] || {}; names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = 0; }); });
+      save(K_TGT_PP, next); return next;
     });
     setAllowed(prev => {
       const next = { ...(prev || {}) };
-      orgRef.current.forEach(p => {
-        if (p.unit === "LEAD") return;
-        next[p.id] = next[p.id] || {};
-        names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = true; });
-      });
-      save(K_ALLOWED, next);
-      return next;
+      orgRef.current.forEach(p => { if (p.unit === "LEAD") return; next[p.id] = next[p.id] || {}; names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = true; }); });
+      save(K_ALLOWED, next); return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productConfigs.map(c => c.name).join("|"), orgState.map(o => o.id).join("|")]);
@@ -854,21 +695,16 @@ export default function App() {
   };
   useEffect(() => { refreshFromDB(); }, [month]);
 
-  // sync persons ke DB (debounce)
+  // sync persons ke DB (debounced)
   useEffect(() => {
     orgRef.current = orgState;
     const t = setTimeout(() => { apiSyncPersons(orgState).catch(() => {}); }, 300);
     return () => clearTimeout(t);
   }, [orgState]);
 
-  // form BM
-  const [form, setForm] = useState<{ personId: string; product: string; amount: string; date: string }>(
-    () => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() })
-  );
-  // form PIC
-  const [picForm, setPicForm] = useState<{ personId: string; product: string; amount: string; date: string }>(
-    () => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() })
-  );
+  // form BM & PIC
+  const [form, setForm] = useState<{ personId: string; product: string; amount: string; date: string }>(() => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() }));
+  const [picForm, setPicForm] = useState<{ personId: string; product: string; amount: string; date: string }>(() => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() }));
 
   const addAchievement = async () => {
     try {
@@ -880,9 +716,7 @@ export default function App() {
       const row = await apiPostAchievement(payload);
       setAch(s => [{ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: String(row.date).slice(0, 10) }, ...s]);
       setForm(f => ({ ...f, amount: "" }));
-    } catch (e: any) {
-      alert(`Gagal simpan: ${e?.message || e}`);
-    }
+    } catch (e: any) { alert(`Gagal simpan: ${e?.message || e}`); }
   };
   const addAchievementPIC = async () => {
     try {
@@ -894,16 +728,14 @@ export default function App() {
       const row = await apiPostAchievement(payload);
       setAch(s => [{ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: String(row.date).slice(0, 10) }, ...s]);
       setPicForm(f => ({ ...f, amount: "" }));
-    } catch (e: any) {
-      alert(`Gagal simpan: ${e?.message || e}`);
-    }
+    } catch (e: any) { alert(`Gagal simpan: ${e?.message || e}`); }
   };
   const removeAchievement = async (id: string) => {
     try { await apiDeleteAchievement(id); setAch(s => s.filter(x => x.id !== id)); }
     catch (e: any) { alert(`Gagal hapus: ${e?.message || e}`); }
   };
 
-  // jaga pilihan produk valid (BM & PIC)
+  // jaga pilihan produk valid
   useEffect(() => {
     setForm(f => {
       if (!f.personId) return f;
@@ -923,14 +755,8 @@ export default function App() {
     });
   }, [picForm.personId, productConfigs, allowed]); // eslint-disable-line
 
-  const totalsByPerson = useMemo(() => sumByPerson(ach), [ach]);
-  const unitTotal = (unit: Person["unit"]) =>
-    orgState.filter(p => p.unit === unit && !["MBM", "BOS", "BM"].includes(p.role))
-      .reduce((s, p) => s + (totalsByPerson.get(p.id) || 0), 0);
-
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900">
-      {/* HEADER */}
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
         <div className="w-full px-6 py-3 flex items-center gap-4">
           <div className="flex items-center gap-3 shrink-0">
@@ -940,92 +766,47 @@ export default function App() {
               <div className="text-xs text-slate-500">BM input + DB (Neon)</div>
             </div>
           </div>
-
           <div className="flex-1" />
-
-          {/* Compact toggle */}
           <div className="flex items-center gap-2 mr-2">
             <span className="text-sm text-slate-600">Compact</span>
-            <button
-              onClick={() => setCompact(v => !v)}
-              className={`w-12 h-6 rounded-full border transition relative ${compact ? "bg-indigo-600 border-indigo-600" : "bg-slate-200 border-slate-300"}`}
-              aria-label="Toggle compact mode"
-            >
+            <button onClick={() => setCompact(v => !v)} className={`w-12 h-6 rounded-full border transition relative ${compact ? "bg-indigo-600 border-indigo-600" : "bg-slate-200 border-slate-300"}`} aria-label="Toggle compact mode">
               <span className={`absolute top-0.5 ${compact ? "right-0.5" : "left-0.5"} w-5 h-5 rounded-full bg-white shadow transition`} />
             </button>
           </div>
-
-          {/* NAV */}
           <nav className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(["Overview","Individuals","PIC","Input"] as const).map(t => (
-              <button key={t} onClick={() => setTab(t)}
-                className={`px-4 py-2 rounded-xl border transition-colors bg-slate-900 text-white
-                  ${tab === t ? "border-indigo-600" : "border-slate-800 hover:bg-slate-800"}`}>
-                {t}
-              </button>
+              <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-xl border transition-colors bg-slate-900 text-white ${tab === t ? "border-indigo-600" : "border-slate-800 hover:bg-slate-800"}`}>{t}</button>
             ))}
           </nav>
         </div>
       </header>
 
-      {/* MAIN */}
       <main className="w-full px-6 py-4 space-y-4">
         <Section title="Rekap Bulanan & Leaderboard (Fair Ranking)" extra={<div className="text-sm text-slate-500">CSV bisa dibuka di Excel</div>}>
           <div className="flex flex-wrap items-center gap-3">
             <input className="px-3 py-2 rounded-xl border" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
             <Btn className="!bg-indigo-600" onClick={async () => {
               try {
-                const [y, m] = month.split("-");
-                const from = `${y}-${m}-01`;
-                const to = ymd(new Date(Number(y), Number(m), 1));
+                const [y, m] = month.split("-"); const from = `${y}-${m}-01`; const to = ymd(new Date(Number(y), Number(m), 1));
                 const rows = await apiGetAchievements(from, to);
                 const csv = makeCSV(rows.map(r => ({ date: r.date, personId: r.personId, product: r.product, amount: r.amount })), ["date","personId","product","amount"]);
-                const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url; a.download = `rekap_${month}.csv`; a.click();
-                URL.revokeObjectURL(url);
+                const blob = new Blob([csv], { type: "text/csv;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a");
+                a.href = url; a.download = `rekap_${month}.csv`; a.click(); URL.revokeObjectURL(url);
               } catch (e: any) { alert(`Gagal download: ${e?.message || e}`); }
             }}><Download size={16}/> Download Rekap (CSV)</Btn>
             <Btn className="!bg-slate-700" onClick={refreshFromDB}><RefreshCcw size={16}/> Refresh</Btn>
           </div>
         </Section>
 
-        {tab === "Overview" && (
-          <Overview
-            ach={ach} targets={targets} productConfigs={productConfigs}
-            allowed={allowed} org={orgRef.current} compact={compact}
-          />
-        )}
-        {tab === "Individuals" && (
-          <Individuals ach={ach} targets={targets} productConfigs={productConfigs} allowed={allowed} org={orgRef.current} />
-        )}
-        {tab === "PIC" && (
-          <PicInput form={picForm} setForm={setPicForm} addAchievement={addAchievementPIC} ach={ach} allowed={allowed} productConfigs={productConfigs} org={orgRef.current} />
-        )}
-        {tab === "Input" && (
-          <InputPanel
-            pinOk={pinOk} setPinOk={setPinOk}
-            form={form} setForm={setForm} addAchievement={addAchievement}
-            ach={ach} removeAchievement={async (id) => { await apiDeleteAchievement(id); setAch(s => s.filter(x => x.id !== id)); }}
-            targets={targets} setTargets={setTargets}
-            productConfigs={productConfigs} setProductConfigs={setProductConfigs}
-            allowed={allowed} setAllowed={setAllowed}
-            org={orgRef.current} setOrg={setOrgState} setAch={setAch}
-            importLegacyOnce={async () => {
-              const legacy = load<Achievement[]>(K_ACH, []);
-              if (!legacy.length) return alert("Tidak ada data legacy di localStorage.");
-              if (!confirm(`Impor ${legacy.length} achievement ke DB?`)) return;
-              for (const a of legacy) {
-                try { await apiPostAchievement({ personId: a.personId, product: a.product, amount: a.amount, date: a.date }); } catch {}
-              }
-              localStorage.removeItem(K_ACH);
-              await refreshFromDB();
-              alert("Selesai diimpor ke DB.");
-            }}
-            compact={compact}
-          />
-        )}
+        {tab === "Overview" && <Overview ach={ach} targets={targets} productConfigs={productConfigs} allowed={allowed} org={orgRef.current} compact={compact} />}
+        {tab === "Individuals" && <Individuals ach={ach} targets={targets} productConfigs={productConfigs} allowed={allowed} org={orgRef.current} />}
+        {tab === "PIC" && <PicInput form={picForm} setForm={setPicForm} addAchievement={addAchievementPIC} ach={ach} allowed={allowed} productConfigs={productConfigs} org={orgRef.current} />}
+        {tab === "Input" && <InputPanel pinOk={pinOk} setPinOk={setPinOk} form={form} setForm={setForm} addAchievement={addAchievement} ach={ach} removeAchievement={async (id) => { await apiDeleteAchievement(id); setAch(s => s.filter(x => x.id !== id)); }} targets={targets} setTargets={setTargets} productConfigs={productConfigs} setProductConfigs={setProductConfigs} allowed={allowed} setAllowed={setAllowed} org={orgRef.current} setOrg={setOrgState} setAch={setAch} importLegacyOnce={async () => {
+          const legacy = load<Achievement[]>(K_ACH, []); if (!legacy.length) return alert("Tidak ada data legacy di localStorage.");
+          if (!confirm(`Impor ${legacy.length} achievement ke database?`)) return;
+          for (const a of legacy) { try { await apiPostAchievement({ personId: a.personId, product: a.product, amount: a.amount, date: a.date }); } catch {} }
+          localStorage.removeItem(K_ACH); await refreshFromDB(); alert("Selesai diimpor ke DB.");
+        }} compact={compact} />}
 
         <footer className="pt-6 text-sm text-slate-500 flex items-center gap-2">
           <CheckCircle2 size={16} /> Progress/konfigurasi target & izin tersimpan lokal; perolehan tersimpan di DB (Neon).
