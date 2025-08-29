@@ -2,22 +2,17 @@
 import { neon } from "@neondatabase/serverless";
 
 export const CONNECTION =
-  process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.NEON_DATABASE_URL ||
+  "";
 
-if (!CONNECTION) {
-  console.warn(
-    "[DB] DATABASE_URL / POSTGRES_URL belum diset. API akan error sampai env diisi."
-  );
-}
-
-// sql client (null kalau env belum ada)
 export const sql = CONNECTION ? neon(CONNECTION) : null;
 
-// bikin tabel kalau belum ada
 export async function ensureTables() {
   if (!sql) return;
 
-  await sql/* sql */ `
+  await sql/* sql */`
     CREATE TABLE IF NOT EXISTS persons (
       id   TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -26,7 +21,7 @@ export async function ensureTables() {
     );
   `;
 
-  await sql/* sql */ `
+  await sql/* sql */`
     CREATE TABLE IF NOT EXISTS achievements (
       id        TEXT PRIMARY KEY,
       person_id TEXT NOT NULL,
