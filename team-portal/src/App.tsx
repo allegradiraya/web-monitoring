@@ -1,3 +1,4 @@
+/* --- src/App.tsx (FULL) --- */
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Lock, Unlock, Plus, CheckCircle2, X, Download, RefreshCcw } from "lucide-react";
 
@@ -10,7 +11,6 @@ export type Person = {
   role: string;
   unit: "MBM" | "BOS" | "SOCIAL" | "SGK" | "LEAD";
 };
-
 export type Achievement = {
   id: string;
   personId: string;
@@ -18,7 +18,6 @@ export type Achievement = {
   amount: number;
   date: string; // YYYY-MM-DD
 };
-
 type ProductType = "money" | "unit";
 type ProductConfig = { name: string; type: ProductType };
 type AllowedMap = Record<string, Record<string, boolean>>;
@@ -28,7 +27,6 @@ type TargetsPP = Record<string, Record<string, number>>;
    DEFAULT DATA + HELPERS
 ========================================================= */
 const uid = () => Math.random().toString(36).slice(2, 9);
-
 const DEFAULT_ORG: Person[] = [
   { id: "lead-1", name: "Branch Manager — Sukamara", role: "BM", unit: "LEAD" },
   { id: "mbm-1", name: "Micro Banking Manager", role: "MBM", unit: "MBM" },
@@ -51,6 +49,7 @@ const K_PINOK = "tm_pin_ok";
 const K_TGT_PP = "tm_targets_pp";
 const K_FP = "tm_featured_products_v2";
 const K_ALLOWED = "tm_allowed_products_v1";
+const K_COMPACT = "tm_compact_mode";
 
 const load = <T,>(k: string, def: T): T => {
   try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : def; } catch { return def; }
@@ -66,8 +65,6 @@ function sumByPerson(achs: Achievement[]) {
   for (const a of achs) map.set(a.personId, (map.get(a.personId) || 0) + (Number(a.amount) || 0));
   return map;
 }
-const byUnit = (unit: Person["unit"]) => (p: Person) => p.unit === unit && !p.role.match(/MBM|BOS|BM/);
-
 function buildPersonProductIndex(achs: Achievement[]) {
   const idx = new Map<string, Map<string, number>>();
   for (const a of achs) {
@@ -79,30 +76,11 @@ function buildPersonProductIndex(achs: Achievement[]) {
 }
 const getPP = (ppIdx: Map<string, Map<string, number>>, personId: string, product: string) =>
   Number(ppIdx.get(personId)?.get(product) || 0);
-
 const getTarget = (targets: TargetsPP, personId: string, product: string) =>
   Number(targets?.[personId]?.[product] || 0);
 
-const MICRO_INCLUDED_PRODUCTS = ["KUR", "KUM"];
-function unitTotalForProducts(
-  ach: Achievement[],
-  unit: Person["unit"],
-  products: string[],
-  org: Person[]
-) {
-  const set = new Set(products.map((s) => s.toLowerCase()));
-  return ach.reduce((sum, a) => {
-    const person = org.find((p) => p.id === a.personId);
-    if (!person) return sum;
-    if (person.unit !== unit) return sum;
-    if (/(MBM|BOS|BM)/.test(person.role)) return sum;
-    if (!set.has(a.product.toLowerCase())) return sum;
-    return sum + (Number(a.amount) || 0);
-  }, 0);
-}
-
 /* =========================================================
-   WINDOW WIDTH + COL WIDTH CALC (AUTO FIT + COMPACT)
+   WINDOW / COL WIDTH
 ========================================================= */
 function useWindowWidth() {
   const [w, setW] = useState<number>(typeof window !== "undefined" ? window.innerWidth : 1280);
@@ -113,10 +91,9 @@ function useWindowWidth() {
   }, []);
   return w;
 }
-
-const LEFT_W = 180 + 120 + 60; // Nama(180) + Role(120) + padding
+const LEFT_W = 180 + 120 + 60;
 function calcColW(totalCols: number, viewport: number, compact: boolean) {
-  if (totalCols <= 0) return 160;
+  if (totalCols <= 0) return 140;
   const usable = Math.max(500, viewport - LEFT_W - 120);
   const ideal = Math.floor(usable / totalCols);
   const MIN = compact ? 120 : 140;
@@ -125,32 +102,19 @@ function calcColW(totalCols: number, viewport: number, compact: boolean) {
 }
 
 /* =========================================================
-   UI ATOMS
+   SMALL UI
 ========================================================= */
 const Btn = ({
   children, onClick, className = "", title, type = "button" as "button" | "submit", disabled
-}: {
-  children: ReactNode;
-  onClick?: () => void;
-  className?: string;
-  title?: string;
-  type?: "button" | "submit";
-  disabled?: boolean;
-}) => (
-  <button
-    type={type}
-    onClick={onClick}
-    disabled={disabled}
+}: { children: ReactNode; onClick?: () => void; className?: string; title?: string; type?: "button" | "submit"; disabled?: boolean; }) => (
+  <button type={type} onClick={onClick} disabled={disabled}
     title={title}
     className={`px-3 py-2 rounded-xl border transition
       bg-slate-900 border-slate-800 text-white hover:bg-slate-800
-      disabled:opacity-60 disabled:cursor-not-allowed
-      ${className}`}
-  >
+      disabled:opacity-60 disabled:cursor-not-allowed ${className}`}>
     {children}
   </button>
 );
-
 const Section = ({ title, children, extra }: { title: string; children: ReactNode; extra?: ReactNode }) => (
   <div className="p-4 rounded-2xl bg-white border overflow-hidden">
     <div className="flex items-center justify-between mb-3">
@@ -160,7 +124,6 @@ const Section = ({ title, children, extra }: { title: string; children: ReactNod
     {children}
   </div>
 );
-
 function PBar({ value, target }: { value: number; target: number }) {
   if (!target || target <= 0) return <div className="text-[11px] text-slate-400">—</div>;
   const pct = Math.min(100, Math.round((value / target) * 100));
@@ -175,7 +138,7 @@ function PBar({ value, target }: { value: number; target: number }) {
 }
 
 /* =========================================================
-   TABLE ROW
+   TABLE helpers
 ========================================================= */
 function ProductCell({ value, target, isMoney }: { value: number; target: number; isMoney: boolean }) {
   return (
@@ -185,58 +148,36 @@ function ProductCell({ value, target, isMoney }: { value: number; target: number
     </div>
   );
 }
-
 function PersonRow({
   p, ppIdx, targets, productConfigs, allowed, colW, compact
-}: {
-  p: Person;
-  ppIdx: Map<string, Map<string, number>>;
-  targets: TargetsPP;
-  productConfigs: ProductConfig[];
-  allowed: AllowedMap;
-  colW: number;
-  compact: boolean;
-}) {
+}: { p: Person; ppIdx: Map<string, Map<string, number>>; targets: TargetsPP;
+  productConfigs: ProductConfig[]; allowed: AllowedMap; colW: number; compact: boolean; }) {
   const pad = compact ? "p-1" : "p-2";
   return (
     <tr className="border-t align-top">
       <td className={`${pad} font-medium min-w-[180px] sticky left-0 bg-white z-10`}>{p.name}</td>
       <td className={`${pad} text-slate-600 min-w-[120px] sticky left-[180px] bg-white z-10`}>{p.role}</td>
       {productConfigs.map(cfg => {
-        const isAllowed = !!allowed?.[p.id]?.[cfg.name];
-        if (!isAllowed) {
-          return <td key={cfg.name} className={`${pad} align-top text-slate-400`} style={{ minWidth: colW }}>—</td>;
-        }
+        const allowedHere = !!allowed?.[p.id]?.[cfg.name];
+        if (!allowedHere) return <td key={cfg.name} className={`${pad} text-slate-400`} style={{ minWidth: colW }}>—</td>;
         const val = getPP(ppIdx, p.id, cfg.name);
         const tgt = getTarget(targets, p.id, cfg.name);
-        const isMoney = cfg.type === "money";
         return (
-          <td key={cfg.name} className={`${pad} align-top`} style={{ minWidth: colW }}>
-            <ProductCell value={val} target={tgt} isMoney={isMoney} />
+          <td key={cfg.name} className={pad} style={{ minWidth: colW }}>
+            <ProductCell value={val} target={tgt} isMoney={cfg.type === "money"} />
           </td>
         );
       })}
     </tr>
   );
 }
-
-/* =========================================================
-   HELPERS
-========================================================= */
-function visibleProductsForAll(
-  people: Person[],
-  productConfigs: ProductConfig[],
-  allowed: AllowedMap
-): ProductConfig[] {
+function visibleProductsForAll(people: Person[], productConfigs: ProductConfig[], allowed: AllowedMap): ProductConfig[] {
   const shown = new Set<string>();
-  for (const p of people) {
-    for (const cfg of productConfigs) {
-      if (allowed?.[p.id]?.[cfg.name]) shown.add(cfg.name);
-    }
-  }
+  people.forEach(p => productConfigs.forEach(cfg => {
+    if (allowed?.[p.id]?.[cfg.name]) shown.add(cfg.name);
+  }));
   return productConfigs.filter(cfg => shown.has(cfg.name));
 }
-
 function makeCSV(rows: any[], headers: string[]) {
   const esc = (v: any) => {
     if (v == null) return "";
@@ -247,7 +188,7 @@ function makeCSV(rows: any[], headers: string[]) {
 }
 
 /* =========================================================
-   API helpers (Neon)
+   API helpers (panggil Vercel functions)
 ========================================================= */
 async function apiGetAchievements(from?: string, to?: string): Promise<Achievement[]> {
   const qs = from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : "";
@@ -259,59 +200,48 @@ async function apiGetAchievements(from?: string, to?: string): Promise<Achieveme
     personId: row.person_id,
     product: row.product,
     amount: Number(row.amount),
-    date: row.date.slice(0, 10),
+    date: String(row.date).slice(0, 10),
   }));
 }
 async function apiPostAchievement(a: Omit<Achievement, "id">) {
   const r = await fetch("/api/achievements", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(a),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(a),
   });
   const j = await r.json();
-  if (!j.ok) throw new Error(j.error);
+  if (!j.ok) throw new Error(j.error || "insert failed");
   return j.row as { id: string; person_id: string; product: string; amount: number; date: string };
 }
 async function apiDeleteAchievement(id: string) {
   const r = await fetch(`/api/achievements?id=${encodeURIComponent(id)}`, { method: "DELETE" });
   const j = await r.json();
-  if (!j.ok) throw new Error(j.error);
+  if (!j.ok) throw new Error(j.error || "delete failed");
 }
 async function apiSyncPersons(persons: Person[]) {
-  await fetch("/api/persons", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+  const r = await fetch("/api/persons", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ persons }),
   });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || "sync persons failed");
 }
 
 /* =========================================================
-   OVERVIEW — SATU KOTAK (SEMUA PEGAWAI)
+   OVERVIEW (gabung satu tabel)
 ========================================================= */
 function Overview({
-  ach, unitTotal, targets, productConfigs, allowed, org, compact
-}: {
-  ach: Achievement[];
-  unitTotal: (u: Person["unit"]) => number;
-  targets: TargetsPP;
-  productConfigs: ProductConfig[];
-  allowed: AllowedMap;
-  org: Person[];
-  compact: boolean;
-}) {
+  ach, targets, productConfigs, allowed, org, compact
+}: { ach: Achievement[]; targets: TargetsPP; productConfigs: ProductConfig[]; allowed: AllowedMap; org: Person[]; compact: boolean; }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
-
-  const peopleAll = useMemo(
-    () => org.filter(p => p.unit !== "LEAD" && !["MBM","BOS","BM"].includes(p.role)),
-    [org]
+  const people = useMemo(() =>
+    org.filter(p => p.unit !== "LEAD" && !["MBM", "BOS", "BM"].includes(p.role)), [org]
   );
-
-  const cols = useMemo(
-    () => visibleProductsForAll(peopleAll, productConfigs, allowed),
-    [peopleAll, productConfigs, allowed]
-  );
-
+  const cols = useMemo(() => visibleProductsForAll(people, productConfigs, allowed), [people, productConfigs, allowed]);
   const width = useWindowWidth();
   const colW = calcColW(cols.length, width, compact);
   const tableMinW = LEFT_W + cols.length * colW;
-
   const pad = compact ? "p-1" : "p-2";
   const headTxt = compact ? "text-[12px]" : "text-sm";
 
@@ -323,30 +253,19 @@ function Overview({
             <tr>
               <th className={`${pad} min-w-[180px] sticky left-0 bg-slate-50 z-10`}>Nama</th>
               <th className={`${pad} min-w-[120px] sticky left-[180px] bg-slate-50 z-10`}>Role</th>
-              {cols.map(cfg => (
-                <th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>
-              ))}
+              {cols.map(cfg => (<th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>))}
             </tr>
           </thead>
           <tbody>
-            {peopleAll.map(p => (
-              <PersonRow
-                key={p.id}
-                p={p}
-                ppIdx={ppIdx}
-                targets={targets}
-                productConfigs={cols}
-                allowed={allowed}
-                colW={colW}
-                compact={compact}
-              />
+            {people.map(p => (
+              <PersonRow key={p.id} p={p}
+                ppIdx={ppIdx} targets={targets} productConfigs={cols} allowed={allowed}
+                colW={colW} compact={compact} />
             ))}
           </tbody>
         </table>
       </div>
-      {cols.length === 0 && (
-        <div className="text-xs text-slate-500 mt-2">Belum ada produk yang diizinkan.</div>
-      )}
+      {cols.length === 0 && <div className="text-xs text-slate-500 mt-2">Belum ada produk yang diizinkan.</div>}
     </Section>
   );
 }
@@ -356,13 +275,7 @@ function Overview({
 ========================================================= */
 function Individuals({
   ach, productConfigs, targets, allowed, org
-}: {
-  ach: Achievement[];
-  productConfigs: ProductConfig[];
-  targets: TargetsPP;
-  allowed: AllowedMap;
-  org: Person[];
-}) {
+}: { ach: Achievement[]; productConfigs: ProductConfig[]; targets: TargetsPP; allowed: AllowedMap; org: Person[]; }) {
   const ppIdx = useMemo(() => buildPersonProductIndex(ach), [ach]);
   return (
     <div className="space-y-4">
@@ -393,24 +306,18 @@ function Individuals({
 }
 
 /* =========================================================
-   PIC INPUT (untuk tim, tanpa PIN)
+   PIC INPUT (tanpa PIN)
 ========================================================= */
 function PicInput({
   form, setForm, addAchievement, ach, allowed, productConfigs, org
-}: {
-  form: { personId: string; product: string; amount: string; date: string };
+}: { form: { personId: string; product: string; amount: string; date: string };
   setForm: Dispatch<SetStateAction<{ personId: string; product: string; amount: string; date: string }>>;
-  addAchievement: () => void;
-  ach: Achievement[];
-  allowed: AllowedMap;
-  productConfigs: ProductConfig[];
-  org: Person[];
-}) {
+  addAchievement: () => void; ach: Achievement[]; allowed: AllowedMap;
+  productConfigs: ProductConfig[]; org: Person[]; }) {
   const allowedListForSelected = form.personId
     ? productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(c => c.name)
     : [];
-  const canAdd = !!form.personId && !!form.product && !!form.amount &&
-    (!!allowed?.[form.personId]?.[form.product]);
+  const canAdd = !!form.personId && !!form.product && !!form.amount && (!!allowed?.[form.personId]?.[form.product]);
 
   return (
     <div className="space-y-4">
@@ -466,11 +373,9 @@ function PicInput({
           </div>
 
           <div className="md:col-span-4">
-            <Btn
-              className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
+            <Btn className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
               onClick={() => { if (canAdd) addAchievement(); }}
-              disabled={!canAdd}
-            >
+              disabled={!canAdd}>
               <Plus size={16} /> Tambah
             </Btn>
           </div>
@@ -509,38 +414,27 @@ function PicInput({
 }
 
 /* =========================================================
-   INPUT PANEL (BM) — lengkap + PIN
+   INPUT PANEL (BM + PIN)
 ========================================================= */
 function InputPanel({
   pinOk, setPinOk, form, setForm, addAchievement, ach, removeAchievement,
   targets, setTargets, productConfigs, setProductConfigs, allowed, setAllowed,
   org, setOrg, setAch, importLegacyOnce, compact
 }: {
-  pinOk: boolean;
-  setPinOk: Dispatch<SetStateAction<boolean>>;
+  pinOk: boolean; setPinOk: Dispatch<SetStateAction<boolean>>;
   form: { personId: string; product: string; amount: string; date: string };
   setForm: Dispatch<SetStateAction<{ personId: string; product: string; amount: string; date: string }>>;
-  addAchievement: () => void;
-  ach: Achievement[];
-  removeAchievement: (id: string) => void;
-  targets: TargetsPP;
-  setTargets: Dispatch<SetStateAction<TargetsPP>>;
-  productConfigs: ProductConfig[];
-  setProductConfigs: Dispatch<SetStateAction<ProductConfig[]>>;
-  allowed: AllowedMap;
-  setAllowed: Dispatch<SetStateAction<AllowedMap>>;
-  org: Person[];
-  setOrg: Dispatch<SetStateAction<Person[]>>;
+  addAchievement: () => void; ach: Achievement[]; removeAchievement: (id: string) => void;
+  targets: TargetsPP; setTargets: Dispatch<SetStateAction<TargetsPP>>;
+  productConfigs: ProductConfig[]; setProductConfigs: Dispatch<SetStateAction<ProductConfig[]>>;
+  allowed: AllowedMap; setAllowed: Dispatch<SetStateAction<AllowedMap>>;
+  org: Person[]; setOrg: Dispatch<SetStateAction<Person[]>>;
   setAch: Dispatch<SetStateAction<Achievement[]>>;
-  importLegacyOnce: () => void;
-  compact: boolean;
+  importLegacyOnce: () => void; compact: boolean;
 }) {
   const [newProd, setNewProd] = useState("");
   const [newType, setNewType] = useState<ProductType>("money");
-
-  const [newEmp, setNewEmp] = useState<{ name: string; role: string; unit: Person["unit"] }>({
-    name: "", role: "SGP", unit: "MBM"
-  });
+  const [newEmp, setNewEmp] = useState<{ name: string; role: string; unit: Person["unit"] }>({ name: "", role: "SGP", unit: "MBM" });
 
   const ensureTargetsForProducts = (names: string[], people: Person[]) => {
     setTargets(prev => {
@@ -554,13 +448,13 @@ function InputPanel({
       return next;
     });
   };
-  const ensureAllowedForProducts = (names: string[], people: Person[], defaultAllowed = true) => {
+  const ensureAllowedForProducts = (names: string[], people: Person[], def = true) => {
     setAllowed(prev => {
       const next = { ...(prev || {}) };
       people.forEach(p => {
         if (p.unit === "LEAD") return;
         next[p.id] = next[p.id] || {};
-        names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = defaultAllowed; });
+        names.forEach(n => { if (next[p.id][n] === undefined) next[p.id][n] = def; });
       });
       save(K_ALLOWED, next);
       return next;
@@ -570,31 +464,25 @@ function InputPanel({
   const addProduct = () => {
     const name = newProd.trim();
     if (!name) return;
-    if (productConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-      alert("Produk sudah ada."); return;
-    }
+    if (productConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) return alert("Produk sudah ada.");
     const cfg = { name, type: newType } as ProductConfig;
     const next = [...productConfigs, cfg];
-    setProductConfigs(next);
-    save(K_FP, next);
+    setProductConfigs(next); save(K_FP, next);
     ensureTargetsForProducts([name], org);
     ensureAllowedForProducts([name], org, true);
     setNewProd("");
   };
-
   const removeProduct = (name: string) => {
-    if (!confirm(`Hapus kolom produk "${name}"? Data target & izin lama tetap tersimpan.`)) return;
+    if (!confirm(`Hapus kolom "${name}"?`)) return;
     const next = productConfigs.filter(c => c.name !== name);
-    setProductConfigs(next);
-    save(K_FP, next);
+    setProductConfigs(next); save(K_FP, next);
   };
 
   const productNames = productConfigs.map(c => c.name);
   const allowedListForSelected = form.personId
     ? productConfigs.filter(cfg => !!allowed?.[form.personId]?.[cfg.name]).map(c => c.name)
     : [];
-  const canAdd = !!form.personId && !!form.product && !!form.amount &&
-    (!!allowed?.[form.personId]?.[form.product]);
+  const canAdd = !!form.personId && !!form.product && !!form.amount && (!!allowed?.[form.personId]?.[form.product]);
 
   const addEmployee = () => {
     const name = newEmp.name.trim();
@@ -608,10 +496,9 @@ function InputPanel({
     setNewEmp({ name: "", role: "SGP", unit: "MBM" });
   };
   const deleteEmployee = (id: string) => {
-    const emp = org.find(o => o.id === id);
-    if (!emp) return;
+    const emp = org.find(o => o.id === id); if (!emp) return;
     if (emp.unit === "LEAD") return alert("Pegawai LEAD tidak bisa dihapus.");
-    if (!confirm(`Hapus pegawai "${emp.name}"? Semua perolehan terkait juga akan dihapus.`)) return;
+    if (!confirm(`Hapus pegawai "${emp.name}"?`)) return;
     const nextOrg = org.filter(o => o.id !== id);
     setOrg(nextOrg); save(K_ORG, nextOrg);
     setTargets(prev => { const cur = { ...(prev || {}) }; delete cur[id]; save(K_TGT_PP, cur); return cur; });
@@ -623,7 +510,6 @@ function InputPanel({
   const width = useWindowWidth();
   const colW = calcColW(productConfigs.length, width, compact);
   const targetTableMinW = LEFT_W + productConfigs.length * colW;
-
   const pad = compact ? "p-1" : "p-2";
   const headTxt = compact ? "text-[12px]" : "text-sm";
 
@@ -638,14 +524,11 @@ function InputPanel({
               if (v === "MANDIRI123") setPinOk(true); else alert("PIN salah");
             }}><Unlock size={16} /> Masuk</Btn>
           </div>
-          <div className="text-xs text-slate-500 mt-2">* Sementara pakai PIN lokal. Bisa dipindah ke backend nanti.</div>
+          <div className="text-xs text-slate-500 mt-2">* PIN lokal (bisa dipindah ke backend nanti).</div>
         </Section>
       ) : (
         <>
-          <Section
-            title="Input Perolehan (BM Only)"
-            extra={<Btn className="!bg-slate-700" onClick={() => setPinOk(false)}><Lock size={14} /> Kunci</Btn>}
-          >
+          <Section title="Input Perolehan (BM Only)" extra={<Btn className="!bg-slate-700" onClick={() => setPinOk(false)}><Lock size={14} /> Kunci</Btn>}>
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <div>
                 <div className="text-sm mb-1">Nama</div>
@@ -698,11 +581,9 @@ function InputPanel({
               </div>
 
               <div className="md:col-span-4">
-                <Btn
-                  className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
+                <Btn className={`${canAdd ? "!bg-indigo-600" : "!bg-slate-400"} !text-white flex items-center gap-2`}
                   onClick={() => { if (canAdd) addAchievement(); }}
-                  disabled={!canAdd}
-                >
+                  disabled={!canAdd}>
                   <Plus size={16} /> Tambah
                 </Btn>
               </div>
@@ -755,9 +636,7 @@ function InputPanel({
                   <tr>
                     <th className={`${pad} min-w-[180px] sticky left-0 bg-slate-50 z-10`}>Nama</th>
                     <th className={`${pad} min-w-[120px] sticky left-[180px] bg-slate-50 z-10`}>Role</th>
-                    {productConfigs.map(cfg => (
-                      <th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>
-                    ))}
+                    {productConfigs.map(cfg => (<th key={cfg.name} className={`${pad} text-right`} style={{ width: colW }}>{cfg.name}</th>))}
                   </tr>
                 </thead>
                 <tbody>
@@ -859,11 +738,9 @@ function InputPanel({
           </Section>
 
           {/* Log Input Terbaru */}
-          <Section title="Log Input Terbaru" extra={
-            <div className="flex gap-2">
-              <Btn className="!bg-emerald-600" onClick={importLegacyOnce}><Download size={16}/> Impor Ach Lama ke DB (sekali)</Btn>
-            </div>
-          }>
+          <Section title="Log Input Terbaru" extra={<div className="flex gap-2">
+            <Btn className="!bg-emerald-600" onClick={importLegacyOnce}><Download size={16}/> Impor Ach Lama ke DB (sekali)</Btn>
+          </div>}>
             <div className="overflow-x-auto">
               <table className="w-full table-fixed text-sm min-w-[900px]">
                 <thead className="bg-slate-50 text-left">
@@ -901,7 +778,7 @@ function InputPanel({
 }
 
 /* =========================================================
-   MAIN APP
+   MAIN
 ========================================================= */
 export default function App() {
   const DEFAULT_PRODUCT_CONFIG: ProductConfig[] = [
@@ -931,11 +808,10 @@ export default function App() {
   const [allowed, setAllowed] = useState<AllowedMap>(() => load<AllowedMap>(K_ALLOWED, {}));
   useEffect(() => save(K_ALLOWED, allowed), [allowed]);
 
-  // Compact mode (persist)
-  const [compact, setCompact] = useState<boolean>(() => load<boolean>("tm_compact_mode", false));
-  useEffect(() => save("tm_compact_mode", compact), [compact]);
+  const [compact, setCompact] = useState<boolean>(() => load<boolean>(K_COMPACT, false));
+  useEffect(() => save(K_COMPACT, compact), [compact]);
 
-  // Sinkronisasi target/izin saat produk/pegawai berubah
+  // sinkronisasi target & izin ketika produk/pegawai berubah
   useEffect(() => {
     const names = productConfigs.map(c => c.name);
     setTargets(prev => {
@@ -963,64 +839,71 @@ export default function App() {
 
   useEffect(() => save(K_PINOK, pinOk), [pinOk]);
 
-  // FETCH DB (per bulan)
-  const [month, setMonth] = useState(() => {
-    const d = new Date(); d.setDate(1);
-    return ymd(d).slice(0, 7);
-  });
+  // fetch per bulan
+  const [month, setMonth] = useState(() => { const d = new Date(); d.setDate(1); return ymd(d).slice(0, 7); });
   const refreshFromDB = async () => {
-    const [y, m] = month.split("-");
-    const from = `${y}-${m}-01`;
-    const to = ymd(new Date(Number(y), Number(m), 1));
-    const rows = await apiGetAchievements(from, to);
-    setAch(rows);
+    try {
+      const [y, m] = month.split("-");
+      const from = `${y}-${m}-01`;
+      const to = ymd(new Date(Number(y), Number(m), 1));
+      const rows = await apiGetAchievements(from, to);
+      setAch(rows);
+    } catch (e: any) {
+      alert(`Gagal fetch data: ${e?.message || e}`);
+    }
   };
   useEffect(() => { refreshFromDB(); }, [month]);
 
-  // DB sync persons (debounce)
+  // sync persons ke DB (debounce)
   useEffect(() => {
     orgRef.current = orgState;
     const t = setTimeout(() => { apiSyncPersons(orgState).catch(() => {}); }, 300);
     return () => clearTimeout(t);
   }, [orgState]);
 
-  // Form BM
+  // form BM
   const [form, setForm] = useState<{ personId: string; product: string; amount: string; date: string }>(
     () => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() })
   );
-  // Form PIC
+  // form PIC
   const [picForm, setPicForm] = useState<{ personId: string; product: string; amount: string; date: string }>(
     () => ({ personId: "", product: productConfigs[0]?.name ?? "", amount: "", date: today() })
   );
 
   const addAchievement = async () => {
-    if (!form.personId || !form.product || !form.amount) return alert("Lengkapi data.");
-    if (!allowed?.[form.personId]?.[form.product]) return alert("Produk tidak diizinkan untuk pegawai ini.");
-    const amount = Number(form.amount);
-    if (Number.isNaN(amount) || amount < 0) return alert("Amount tidak valid.");
-    const payload = { personId: form.personId, product: form.product, amount, date: form.date };
-    const row = await apiPostAchievement(payload);
-    setAch(s => [{ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: row.date.slice(0, 10) }, ...s]);
-    setForm(f => ({ ...f, amount: "" }));
+    try {
+      if (!form.personId || !form.product || !form.amount) return alert("Lengkapi data.");
+      if (!allowed?.[form.personId]?.[form.product]) return alert("Produk tidak diizinkan.");
+      const amount = Number(form.amount);
+      if (!Number.isFinite(amount) || amount < 0) return alert("Amount tidak valid.");
+      const payload = { personId: form.personId, product: form.product, amount, date: form.date };
+      const row = await apiPostAchievement(payload);
+      setAch(s => [{ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: String(row.date).slice(0, 10) }, ...s]);
+      setForm(f => ({ ...f, amount: "" }));
+    } catch (e: any) {
+      alert(`Gagal simpan: ${e?.message || e}`);
+    }
   };
-
   const addAchievementPIC = async () => {
-    if (!picForm.personId || !picForm.product || !picForm.amount) return alert("Lengkapi data.");
-    if (!allowed?.[picForm.personId]?.[picForm.product]) return alert("Produk tidak diizinkan untuk pegawai ini.");
-    const amount = Number(picForm.amount);
-    if (Number.isNaN(amount) || amount < 0) return alert("Amount tidak valid.");
-    const payload = { personId: picForm.personId, product: picForm.product, amount, date: picForm.date };
-    const row = await apiPostAchievement(payload);
-    setAch(s => [{ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: row.date.slice(0, 10) }, ...s]);
-    setPicForm(f => ({ ...f, amount: "" }));
+    try {
+      if (!picForm.personId || !picForm.product || !picForm.amount) return alert("Lengkapi data.");
+      if (!allowed?.[picForm.personId]?.[picForm.product]) return alert("Produk tidak diizinkan.");
+      const amount = Number(picForm.amount);
+      if (!Number.isFinite(amount) || amount < 0) return alert("Amount tidak valid.");
+      const payload = { personId: picForm.personId, product: picForm.product, amount, date: picForm.date };
+      const row = await apiPostAchievement(payload);
+      setAch(s => [{ id: row.id, personId: row.person_id, product: row.product, amount: Number(row.amount), date: String(row.date).slice(0, 10) }, ...s]);
+      setPicForm(f => ({ ...f, amount: "" }));
+    } catch (e: any) {
+      alert(`Gagal simpan: ${e?.message || e}`);
+    }
   };
-
   const removeAchievement = async (id: string) => {
-    await apiDeleteAchievement(id);
-    setAch(s => s.filter(x => x.id !== id));
+    try { await apiDeleteAchievement(id); setAch(s => s.filter(x => x.id !== id)); }
+    catch (e: any) { alert(`Gagal hapus: ${e?.message || e}`); }
   };
 
-  // Menjaga pilihan produk tetap valid saat person berubah (BM & PIC)
+  // jaga pilihan produk valid (BM & PIC)
   useEffect(() => {
     setForm(f => {
       if (!f.personId) return f;
@@ -1040,7 +923,6 @@ export default function App() {
     });
   }, [picForm.personId, productConfigs, allowed]); // eslint-disable-line
 
-  // Statistik unit (dipertahankan bila butuh)
   const totalsByPerson = useMemo(() => sumByPerson(ach), [ach]);
   const unitTotal = (unit: Person["unit"]) =>
     orgState.filter(p => p.unit === unit && !["MBM", "BOS", "BM"].includes(p.role))
@@ -1076,12 +958,9 @@ export default function App() {
           {/* NAV */}
           <nav className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(["Overview","Individuals","PIC","Input"] as const).map(t => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
+              <button key={t} onClick={() => setTab(t)}
                 className={`px-4 py-2 rounded-xl border transition-colors bg-slate-900 text-white
-                  ${tab === t ? "border-indigo-600" : "border-slate-800 hover:bg-slate-800"}`}
-              >
+                  ${tab === t ? "border-indigo-600" : "border-slate-800 hover:bg-slate-800"}`}>
                 {t}
               </button>
             ))}
@@ -1091,30 +970,22 @@ export default function App() {
 
       {/* MAIN */}
       <main className="w-full px-6 py-4 space-y-4">
-        <Section
-          title="Rekap Bulanan & Leaderboard (Fair Ranking)"
-          extra={<div className="text-sm text-slate-500">CSV bisa dibuka di Excel</div>}
-        >
+        <Section title="Rekap Bulanan & Leaderboard (Fair Ranking)" extra={<div className="text-sm text-slate-500">CSV bisa dibuka di Excel</div>}>
           <div className="flex flex-wrap items-center gap-3">
-            <input
-              className="px-3 py-2 rounded-xl border"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
+            <input className="px-3 py-2 rounded-xl border" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
             <Btn className="!bg-indigo-600" onClick={async () => {
-              const [y, m] = month.split("-");
-              const from = `${y}-${m}-01`;
-              const to = ymd(new Date(Number(y), Number(m), 1));
-              const rows = await apiGetAchievements(from, to);
-              const csv = makeCSV(rows.map(r => ({
-                date: r.date, personId: r.personId, product: r.product, amount: r.amount
-              })), ["date","personId","product","amount"]);
-              const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url; a.download = `rekap_${month}.csv`; a.click();
-              URL.revokeObjectURL(url);
+              try {
+                const [y, m] = month.split("-");
+                const from = `${y}-${m}-01`;
+                const to = ymd(new Date(Number(y), Number(m), 1));
+                const rows = await apiGetAchievements(from, to);
+                const csv = makeCSV(rows.map(r => ({ date: r.date, personId: r.personId, product: r.product, amount: r.amount })), ["date","personId","product","amount"]);
+                const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url; a.download = `rekap_${month}.csv`; a.click();
+                URL.revokeObjectURL(url);
+              } catch (e: any) { alert(`Gagal download: ${e?.message || e}`); }
             }}><Download size={16}/> Download Rekap (CSV)</Btn>
             <Btn className="!bg-slate-700" onClick={refreshFromDB}><RefreshCcw size={16}/> Refresh</Btn>
           </div>
@@ -1122,60 +993,29 @@ export default function App() {
 
         {tab === "Overview" && (
           <Overview
-            ach={ach}
-            unitTotal={unitTotal}
-            targets={targets}
-            productConfigs={productConfigs}
-            allowed={allowed}
-            org={orgRef.current}
-            compact={compact}
+            ach={ach} targets={targets} productConfigs={productConfigs}
+            allowed={allowed} org={orgRef.current} compact={compact}
           />
         )}
-
         {tab === "Individuals" && (
-          <Individuals
-            ach={ach}
-            targets={targets}
-            productConfigs={productConfigs}
-            allowed={allowed}
-            org={orgRef.current}
-          />
+          <Individuals ach={ach} targets={targets} productConfigs={productConfigs} allowed={allowed} org={orgRef.current} />
         )}
-
         {tab === "PIC" && (
-          <PicInput
-            form={picForm}
-            setForm={setPicForm}
-            addAchievement={addAchievementPIC}
-            ach={ach}
-            allowed={allowed}
-            productConfigs={productConfigs}
-            org={orgRef.current}
-          />
+          <PicInput form={picForm} setForm={setPicForm} addAchievement={addAchievementPIC} ach={ach} allowed={allowed} productConfigs={productConfigs} org={orgRef.current} />
         )}
-
         {tab === "Input" && (
           <InputPanel
-            pinOk={pinOk}
-            setPinOk={setPinOk}
-            form={form}
-            setForm={setForm}
-            addAchievement={addAchievement}
-            ach={ach}
-            removeAchievement={removeAchievement}
-            targets={targets}
-            setTargets={setTargets}
-            productConfigs={productConfigs}
-            setProductConfigs={setProductConfigs}
-            allowed={allowed}
-            setAllowed={setAllowed}
-            org={orgRef.current}
-            setOrg={setOrgState}
-            setAch={setAch}
+            pinOk={pinOk} setPinOk={setPinOk}
+            form={form} setForm={setForm} addAchievement={addAchievement}
+            ach={ach} removeAchievement={async (id) => { await apiDeleteAchievement(id); setAch(s => s.filter(x => x.id !== id)); }}
+            targets={targets} setTargets={setTargets}
+            productConfigs={productConfigs} setProductConfigs={setProductConfigs}
+            allowed={allowed} setAllowed={setAllowed}
+            org={orgRef.current} setOrg={setOrgState} setAch={setAch}
             importLegacyOnce={async () => {
               const legacy = load<Achievement[]>(K_ACH, []);
-              if (!legacy.length) { alert("Tidak ada data legacy di localStorage."); return; }
-              if (!confirm(`Impor ${legacy.length} achievement lama ke database?`)) return;
+              if (!legacy.length) return alert("Tidak ada data legacy di localStorage.");
+              if (!confirm(`Impor ${legacy.length} achievement ke DB?`)) return;
               for (const a of legacy) {
                 try { await apiPostAchievement({ personId: a.personId, product: a.product, amount: a.amount, date: a.date }); } catch {}
               }
