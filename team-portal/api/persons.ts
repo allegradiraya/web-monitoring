@@ -1,39 +1,41 @@
-// team-portal/api/persons.ts
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSql } from './_db';
+// api/persons.ts
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { sql, ensureTables } from "./_db";
+
+function send(res: VercelResponse, data: any, status = 200) {
+  res.status(status).setHeader("cache-control", "no-store").json(data);
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const sql = getSql();
   try {
-    if (req.method === 'GET') {
-      const rows = await sql/*sql*/`select id, name, role, unit from persons order by name`;
-      res.status(200).json({ ok: true, rows });
-      return;
+    if (!sql) return send(res, { ok: false, error: "DATABASE_URL/POSTGRES_URL is missing" }, 500);
+
+    await ensureTables();
+
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return send(res, { ok: false, error: "Method Not Allowed" }, 405);
     }
 
-    if (req.method === 'POST') {
-      const { persons } = req.body as {
-        persons: Array<{ id: string; name: string; role: string; unit: string }>;
-      };
-      if (!Array.isArray(persons)) {
-        res.status(400).json({ ok: false, error: 'invalid_payload' });
-        return;
-      }
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const persons = Array.isArray(body?.persons) ? body.persons : [];
+    if (!persons.length) return send(res, { ok: false, error: "No persons" }, 400);
 
-      // upsert by id
-      for (const p of persons) {
-        await sql/*sql*/`
-          insert into persons (id, name, role, unit)
-          values (${p.id}, ${p.name}, ${p.role}, ${p.unit})
-          on conflict (id) do update set name = excluded.name, role = excluded.role, unit = excluded.unit
-        `;
-      }
-      res.status(200).json({ ok: true, count: persons.length });
-      return;
-    }
+    const values = persons.map((p: any) => [
+      String(p.id), String(p.name), String(p.role), String(p.unit),
+    ]);
 
-    res.status(405).json({ ok: false, error: 'method_not_allowed' });
+    await sql/* sql */`
+      INSERT INTO persons (id, name, role, unit)
+      VALUES ${values}
+      ON CONFLICT (id) DO UPDATE
+      SET name = EXCLUDED.name,
+          role = EXCLUDED.role,
+          unit = EXCLUDED.unit;
+    `;
+
+    return send(res, { ok: true, count: persons.length });
   } catch (e: any) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
+    return send(res, { ok: false, error: e?.message || "Internal error" }, 500);
   }
 }
