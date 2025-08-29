@@ -1,61 +1,78 @@
-// team-portal/api/achievements.ts
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSql } from './_db';
+// api/achievements.ts
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { sql, ensureTables } from "./_db";
+
+function send(res: VercelResponse, data: any, status = 200) {
+  res.status(status).setHeader("cache-control", "no-store").json(data);
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const sql = getSql();
-
   try {
-    if (req.method === 'GET') {
-      // Optional range filter (?from=YYYY-MM-DD&to=YYYY-MM-DD)
-      const { from, to } = req.query as { from?: string; to?: string };
-      const rows =
-        from && to
-          ? await sql/*sql*/`
-              select id, person_id, product, amount, date
-              from achievements
-              where date >= ${from} and date < ${to}
-              order by date desc, id desc
-            `
-          : await sql/*sql*/`
-              select id, person_id, product, amount, date
-              from achievements
-              order by date desc, id desc
-            `;
+    if (!sql) return send(res, { ok: false, error: "DATABASE_URL/POSTGRES_URL is missing" }, 500);
 
-      res.status(200).json({ ok: true, rows });
-      return;
+    await ensureTables();
+
+    if (req.method === "GET") {
+      const from = (req.query.from as string) || "";
+      const to = (req.query.to as string) || "";
+
+      let rows: any[] = [];
+      if (from && to) {
+        rows = await sql/* sql */`
+          SELECT id, person_id, product, amount::float8 AS amount, date
+          FROM achievements
+          WHERE date >= ${from} AND date < ${to}
+          ORDER BY date DESC, id DESC;
+        `;
+      } else {
+        rows = await sql/* sql */`
+          SELECT id, person_id, product, amount::float8 AS amount, date
+          FROM achievements
+          ORDER BY date DESC, id DESC
+          LIMIT 500;
+        `;
+      }
+      return send(res, { ok: true, rows });
     }
 
-    if (req.method === 'POST') {
-      const { personId, product, amount, date } = req.body || {};
-      if (!personId || !product || amount == null || !date) {
-        res.status(400).json({ ok: false, error: 'missing_fields' });
-        return;
+    if (req.method === "POST") {
+      const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+      const personId = String(body?.personId || "").trim();
+      const product = String(body?.product || "").trim();
+      const amount = Number(body?.amount);
+      const date = String(body?.date || "").slice(0, 10);
+
+      if (!personId || !product || !Number.isFinite(amount) || !date) {
+        return send(res, { ok: false, error: "Invalid payload" }, 400);
       }
 
-      const [row] = await sql/*sql*/`
-        insert into achievements (person_id, product, amount, date)
-        values (${personId}, ${product}, ${Number(amount)}, ${date})
-        returning id, person_id, product, amount, date
+      const id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2);
+
+      await sql/* sql */`
+        INSERT INTO achievements (id, person_id, product, amount, date)
+        VALUES (${id}, ${personId}, ${product}, ${amount}, ${date});
       `;
-      res.status(201).json({ ok: true, row });
-      return;
+
+      return send(res, {
+        ok: true,
+        row: { id, person_id: personId, product, amount, date },
+      }, 201);
     }
 
-    if (req.method === 'DELETE') {
-      const id = (req.query?.id as string) || (req.body?.id as string);
-      if (!id) {
-        res.status(400).json({ ok: false, error: 'missing_id' });
-        return;
-      }
-      await sql/*sql*/`delete from achievements where id = ${id}`;
-      res.status(200).json({ ok: true });
-      return;
+    if (req.method === "DELETE") {
+      const id = (req.query.id as string) || "";
+      if (!id) return send(res, { ok: false, error: "id required" }, 400);
+
+      await sql/* sql */`DELETE FROM achievements WHERE id = ${id};`;
+      return send(res, { ok: true });
     }
 
-    res.status(405).json({ ok: false, error: 'method_not_allowed' });
+    res.setHeader("Allow", "GET,POST,DELETE");
+    return send(res, { ok: false, error: "Method Not Allowed" }, 405);
   } catch (e: any) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
+    return send(res, { ok: false, error: e?.message || "Internal error" }, 500);
   }
 }
