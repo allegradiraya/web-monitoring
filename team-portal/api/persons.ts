@@ -3,7 +3,11 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { sql, ensureTables } from "./_db";
 
 function send(res: VercelResponse, data: any, status = 200) {
-  res.status(status).setHeader("cache-control", "no-store").json(data);
+  res
+    .status(status)
+    .setHeader("content-type", "application/json; charset=utf-8")
+    .setHeader("cache-control", "no-store")
+    .send(JSON.stringify(data));
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -17,7 +21,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return send(res, { ok: false, error: "Method Not Allowed" }, 405);
     }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    let body: any = req.body;
+    if (typeof body !== "object") {
+      try { body = JSON.parse(String(req.body || "{}")); }
+      catch { return send(res, { ok: false, error: "Invalid JSON body" }, 400); }
+    }
+
     const persons = Array.isArray(body?.persons) ? body.persons : [];
     if (!persons.length) return send(res, { ok: false, error: "No persons" }, 400);
 
